@@ -47,3 +47,23 @@ model ShipmentDraft {
 
   @@unique([shop, orderId])
 }
+
+// Cached result of the address classifier, one row per normalized address.
+// confirmedType is what staff confirmed last time (the classifier never
+// decides on its own).
+model AddressCheck {
+  id            String    @id @default(cuid())
+  shop          String
+  addressKey    String
+  verdict       String // "residential" | "commercial" | "unsure"
+  confidence    Float
+  reason        String
+  evidenceJson  String    @default("[]") // Evidence[] (max 5)
+  source        String // "live" | "mock"
+  confirmedType String? // "residential" | "commercial"
+  confirmedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([shop, addressKey])
+}

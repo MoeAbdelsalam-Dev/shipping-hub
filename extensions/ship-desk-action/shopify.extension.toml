@@ -1,0 +1,12 @@
+# Order page entry point: Shopify admin → order → More actions → "Ship with Ship Desk".
+# Same pattern as OT's own order action.
+api_version = "2026-10"
+
+[[extensions]]
+name = "Ship with Ship Desk"
+handle = "ship-desk-action"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/ActionExtension.tsx"
+target = "admin.order-details.action.render"

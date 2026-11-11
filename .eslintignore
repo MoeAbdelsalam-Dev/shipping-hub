@@ -3,3 +3,6 @@ build
 public/build
 */*.yml
 .shopify
+extensions/*/dist
+# Admin UI extensions use Preact + their own tsconfig (checked by `npm run typecheck`)
+extensions/

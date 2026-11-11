@@ -20,14 +20,15 @@ export function isValidBox(b: Box): boolean {
   );
 }
 
-/** Parse and sanitize boxes coming from a form post (JSON string). */
-export function parseBoxes(raw: FormDataEntryValue | null): Box[] {
-  if (typeof raw !== "string" || !raw) return [];
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return [];
+/** Parse and sanitize boxes from a form post (JSON string) or a JSON body (array). */
+export function parseBoxes(raw: unknown): Box[] {
+  let data: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return [];
+    }
   }
   if (!Array.isArray(data)) return [];
   return data.slice(0, MAX_BOXES).map((b) => ({

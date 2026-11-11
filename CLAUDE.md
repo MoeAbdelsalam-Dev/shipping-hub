@@ -14,9 +14,9 @@ boxes seen) → compare quotes → book → print labels.
 | Carrier | Integration | Phase |
 |---|---|---|
 | **OT** (local courier) | **No API.** Web page automation — see "OT adapter" | 2 |
-| UPS | Official API | 3 |
-| Canada Post | Official API | 3 |
-| FedEx | Official API | 3 |
+| UPS | Official API | 4 |
+| Canada Post | Official API | 4 |
+| FedEx | Official API | 4 |
 
 No other carriers. Don't add any without being asked.
 
@@ -41,6 +41,20 @@ quotes flow.
   Container start runs `prisma migrate deploy` then the server.
 - Node >= 22.12 (some deps need >= 22.15).
 
+## Entry point
+
+Staff start from the **Shopify order page → More actions → "Ship with Ship
+Desk"** — an admin action extension (`extensions/ship-desk-action`, target
+`admin.order-details.action.render`), the same way OT's own action works. The
+modal shows ship-to, GTA/Non-GTA, the address check + Residential/Commercial,
+then either "Print in OT" (GTA + residential) or box entry + Get quotes. For
+big multi-piece orders it offers "Open full screen" → `/app/ship/:id`. The
+"Orders to ship" list page is secondary. Phase 5 adds an orders-index selection
+action for bulk shipping.
+
+The modal talks to `/api/ship/:id` (JSON; `authenticate.admin` + `cors`), which
+runs the same code as the full page (`app/lib/shipping.server.ts`).
+
 ## Layout
 
 ```
@@ -53,23 +67,31 @@ carriers/
   index.ts          Registry: carriers[], getCarrier(), carrierForQuote(), quoteAll()
   mock.ts           Fake carrier (only registered carrier today)
   ot.ts             OT adapter STUB — not registered until Phase 2
+extensions/
+  ship-desk-action/ Order-page action (Preact + admin web components, own tsconfig)
 app/
   lib/gta.ts        fsaOf(), zoneFor() — pure, safe on client and server
   lib/boxes.ts      presets, parseBoxes() (sanitizes form input), MAX_BOXES = 99
   lib/ot.ts         otOrderUrl() from config/ot.json
   lib/orders.server.ts   Admin GraphQL: listUnfulfilledOrders, getOrder, syncZoneTags
+  lib/shipping.server.ts loadShipment / handleShipment — shared by page + API
+  lib/classifier/        Address classifier (search.server, judge.server, index.server, types)
+  components/AddressCheckPanel.tsx  Verdict + evidence + Confirm (full page)
   routes/app._index.tsx  Orders to ship (list, GTA filter, "save tags to Shopify")
   routes/app.ship.$id.tsx  Shipment screen for one order (id = numeric order id)
-prisma/schema.prisma  Session (Shopify) + ShipmentDraft (per-order saved boxes/address type)
+  routes/api.ship.$id.tsx  JSON API for the order-page extension
+prisma/schema.prisma  Session (Shopify), ShipmentDraft (per-order boxes/address type),
+                      AddressCheck (classifier cache + last staff confirmation)
 ```
 
 ## Data flow (shipment screen)
 
 1. Loader fetches the order from Shopify + any `ShipmentDraft`.
-2. Staff use "Search address on Google" / "Open in Google Maps" (plain links,
-   new tab) and pick **Residential** or **Commercial**. A company name on the
-   address is shown as a hint only — never auto-decided (until Phase 4, and
-   even then staff confirm).
+2. "Check address automatically" runs the classifier (cached per address).
+   Staff see verdict + reason + evidence links and must click **Confirm** (or
+   pick Residential/Commercial themselves). "Unsure" → contact the customer.
+   The Google / Maps buttons stay for manual checks. Nothing is decided or
+   booked without a staff click.
 3. GTA + Residential → "Open in OT to print labels". Nothing else to enter.
 4. Otherwise → box table (presets, custom, Duplicate ×N, remove) → "Get quotes".
    The action upserts the draft, validates, then calls `quoteAll()`.
@@ -123,23 +145,47 @@ Recon to do first (record answers here): exact pre-filled page URL pattern
 and res/com, how quotes render, how booking works, label format (PDF/ZPL) and
 download, tracking numbers, and whether OT's terms allow automation.
 
+## Address classifier (Phase 3 — built, runs on mocks until keys exist)
+
+Mirrors the manual process (`app/lib/classifier/`):
+
+1. Search the full address **including the unit** — `SearchProvider`
+   interface; live = Brave Search API (`BRAVE_SEARCH_API_KEY`). Google Custom
+   Search is closed to new customers.
+2. Claude (`ANTHROPIC_API_KEY`, model `CLASSIFIER_MODEL`, default
+   `claude-opus-5-5`, effort low, structured output, server-side refusal
+   fallback) reads the results.
+3. If a business name recurs, a second search `"<business>" <city>` confirms
+   whether it is really at this address, then Claude judges again.
+4. Home evidence (realtor.ca / condo / rental listings, unit in a residential
+   tower) → residential.
+5. Output `{verdict: residential|commercial|unsure, confidence, reason (1 line),
+   evidence: [{title, url, snippet}] ≤ 5}`, cached in `AddressCheck` per
+   normalized address (+ the last staff confirmation). "Check again" bypasses
+   the cache.
+
+Without keys the mock search + mock judge return "Demo data" results: an
+address with Unit/#/Apt → residential, Suite or Plaza/Industrial/Blvd →
+commercial (via the second search), anything else → unsure.
+
 ## Phases
 
 1. **Foundation (done)** — unfulfilled order list, GTA/Non-GTA zoning from
-   FSA list (+ optional write of order tags), shipment screen with boxes,
-   presets, Duplicate ×N, Residential/Commercial, "Open in OT" step for GTA
-   residential, carrier interface + mock quotes, saved drafts.
+   FSA list, shipment screen with boxes, presets, Duplicate ×N,
+   Residential/Commercial, "Open in OT" step for GTA residential, carrier
+   interface + mock quotes, saved drafts, **order-page action entry point**.
 2. **OT automation** — recon, choose Playwright vs Chrome extension, implement
    `carriers/ot.ts` (quotes from OT sub-couriers, book, OT labels for all
    boxes), `Shipment` table for bookings, create the Shopify fulfillment with
    tracking numbers (needs fulfillment scopes). Fill in the OT URL pattern.
-3. **UPS, Canada Post, FedEx** — official API adapters (sandbox first), quotes
+3. **Address classifier (built, mock mode)** — web search + Claude suggest
+   Residential/Commercial/Unsure with evidence; staff confirm. Goes live when
+   `BRAVE_SEARCH_API_KEY` and `ANTHROPIC_API_KEY` are set.
+4. **UPS, Canada Post, FedEx** — official API adapters (sandbox first), quotes
    side by side with OT, book + labels + tracking, preferred-carrier rules.
-4. **Auto-classify residential/commercial** — Google Places / Address
-   Validation API suggests Residential or Commercial with the reason shown;
-   staff always confirm. Keep the manual Google/Maps buttons.
-5. **Daily workflow + hardening** — bulk actions across orders, pickups and
-   end-of-day manifests, void/re-print, packing slips; shipping cost vs.
+5. **Daily workflow + hardening** — orders-index selection action
+   (`admin.order-index.selection-action.render`) for bulk shipping, pickups
+   and end-of-day manifests, void/re-print, packing slips; shipping cost vs.
    charged reports, audit log, error alerts, Railway DB backups, adapter tests.
 
 ## Conventions
@@ -156,12 +202,13 @@ download, tracking numbers, and whether OT's terms allow automation.
   list, box presets or OT URL must not require touching TypeScript.
 - Money in CAD with 2 decimals; dimensions cm, weight kg, everywhere.
 - New tables → `npx prisma migrate dev --name <what>`; commit the migration.
-- Customer addresses are PII: no addresses in logs, URLs we control, or
-  third-party calls other than the carrier being quoted and Google lookups the
-  staff member clicks themselves.
+- Customer addresses are PII: no addresses in logs or URLs we control. They
+  go only to: the carrier being quoted, Brave Search + the Claude API (address
+  classifier, staff-triggered), and Google lookups the staff member clicks.
+- Secrets/API keys only via env vars (Railway variables), never in code or config/.
 
 ## Commands
 
 - `npm run dev` — `shopify app dev` (tunnel + install on dev store)
-- `npm run typecheck`, `npm run lint`, `npm run build`
+- `npm run typecheck` (app + extension), `npm run lint`, `npm run build`
 - `npm run deploy` — push `shopify.app.toml` (scopes, URLs, webhooks) to Shopify

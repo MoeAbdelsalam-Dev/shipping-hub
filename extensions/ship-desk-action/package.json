@@ -1,0 +1,11 @@
+{
+  "name": "ship-desk-action",
+  "private": true,
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@shopify/ui-extensions": "2026.10.x",
+    "preact": "^10.27.0"
+  }
+}

@@ -5,101 +5,31 @@ import type {
   LoaderFunctionArgs,
 } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
+import { AddressCheckPanel } from "../components/AddressCheckPanel";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
-import db from "../db.server";
-import { getOrder, orderNumericId } from "../lib/orders.server";
-import { otOrderUrl } from "../lib/ot";
+import { MAX_BOXES, type BoxPreset } from "../lib/boxes";
+import type { Classification } from "../lib/classifier/types";
 import {
-  MAX_BOXES,
-  boxPresets,
-  isValidBox,
-  parseBoxes,
-  type BoxPreset,
-} from "../lib/boxes";
-import { quoteAll, type AddressType, type Box, type Quote } from "../../carriers";
+  handleShipment,
+  loadShipment,
+  parseShipRequest,
+} from "../lib/shipping.server";
+import type { AddressType, Box, Quote } from "../../carriers";
 
 // ---------------------------------------------------------------- server
 
-function orderGid(id: string | undefined) {
-  if (!id || !/^\d+$/.test(id)) {
-    throw new Response("Bad order id", { status: 400 });
-  }
-  return `gid://shopify/Order/${id}`;
-}
-
-function parseAddressType(v: FormDataEntryValue | null): AddressType | null {
-  return v === "residential" || v === "commercial" ? v : null;
-}
-
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  const order = await getOrder(admin, orderGid(params.id));
-  if (!order) throw new Response("Order not found", { status: 404 });
-
-  const draft = await db.shipmentDraft.findUnique({
-    where: { shop_orderId: { shop: session.shop, orderId: order.id } },
-  });
-
-  return {
-    order,
-    otUrl: otOrderUrl(order.id, order.name),
-    shopifyOrderUrl: `shopify://admin/orders/${orderNumericId(order.id)}`,
-    presets: boxPresets,
-    draft: draft
-      ? {
-          addressType: parseAddressType(draft.addressType),
-          boxes: parseBoxes(draft.boxesJson),
-        }
-      : null,
-  };
+  return loadShipment(admin, session.shop, params.id ?? "");
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  const form = await request.formData();
-  const intent = form.get("intent");
-  const addressType = parseAddressType(form.get("addressType"));
-  const boxes = parseBoxes(form.get("boxes"));
-
-  const order = await getOrder(admin, orderGid(params.id));
-  if (!order) throw new Response("Order not found", { status: 404 });
-
-  await db.shipmentDraft.upsert({
-    where: { shop_orderId: { shop: session.shop, orderId: order.id } },
-    create: {
-      shop: session.shop,
-      orderId: order.id,
-      orderName: order.name,
-      addressType,
-      boxesJson: JSON.stringify(boxes),
-    },
-    update: { addressType, boxesJson: JSON.stringify(boxes) },
-  });
-
-  if (intent !== "quote") {
-    return { saved: true as const, quotes: null, errors: [] as string[] };
-  }
-
-  const problems: string[] = [];
-  if (!addressType) problems.push("Choose Residential or Commercial.");
-  if (boxes.length === 0) problems.push("Add at least one box.");
-  boxes.forEach((b, i) => {
-    if (!isValidBox(b))
-      problems.push(`Box ${i + 1}: every dimension and the weight must be > 0.`);
-  });
-  if (problems.length || !addressType) {
-    return { saved: true as const, quotes: null, errors: problems };
-  }
-
-  const result = await quoteAll(order, boxes, addressType);
-  return {
-    saved: true as const,
-    quotes: result.quotes,
-    errors: result.errors.map((e) => `${e.carrierId}: ${e.message}`),
-  };
+  const req = parseShipRequest(await request.formData());
+  return handleShipment(admin, session.shop, params.id ?? "", req);
 };
 
 // ---------------------------------------------------------------- client
@@ -133,8 +63,12 @@ function addressQuery(a: {
 }
 
 export default function ShipOrder() {
-  const { order, otUrl, shopifyOrderUrl, presets, draft } = useLoaderData<typeof loader>();
+  const { order, otUrl, shopifyOrderUrl, presets, draft, classification: cached } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const checkFetcher = useFetcher<typeof action>();
+  const classification: Classification | null =
+    checkFetcher.data?.classification ?? cached;
   const shopify = useAppBridge();
 
   const [addressType, setAddressType] = useState<AddressType | null>(
@@ -156,8 +90,10 @@ export default function ShipOrder() {
   const busy = fetcher.state !== "idle";
   const lastIntent = useRef<string>("");
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data?.saved && lastIntent.current === "save") {
-      shopify.toast.show("Shipment saved");
+    if (fetcher.state !== "idle" || !fetcher.data?.saved) return;
+    if (lastIntent.current === "save") shopify.toast.show("Shipment saved");
+    if (lastIntent.current === "confirm" && fetcher.data.addressType) {
+      shopify.toast.show(`Confirmed: ${fetcher.data.addressType}`);
     }
   }, [fetcher.state, fetcher.data, shopify]);
 
@@ -209,6 +145,15 @@ export default function ShipOrder() {
     );
   };
 
+  const runCheck = (intent: "classify" | "reclassify") =>
+    checkFetcher.submit({ intent }, { method: "POST" });
+  const confirmType = (t: AddressType) => {
+    setAddressType(t);
+    lastIntent.current = "confirm";
+    // No "boxes" field: the saved boxes are left as they are.
+    fetcher.submit({ intent: "confirm", addressType: t }, { method: "POST" });
+  };
+
   const quotes: Quote[] | null = fetcher.data?.quotes ?? null;
   const errors = fetcher.data?.errors ?? [];
 
@@ -251,17 +196,28 @@ export default function ShipOrder() {
             </s-button>
           </s-stack>
 
+          <AddressCheckPanel
+            classification={classification}
+            checking={checkFetcher.state !== "idle"}
+            error={checkFetcher.data?.errors[0] ?? null}
+            confirmed={addressType}
+            phone={a.phone ?? null}
+            onCheck={() => runCheck("classify")}
+            onRecheck={() => runCheck("reclassify")}
+            onConfirm={confirmType}
+          />
+
           <s-heading>Residential or commercial?</s-heading>
           <s-stack direction="inline" gap="small-200">
             <s-button
               variant={addressType === "residential" ? "primary" : "secondary"}
-              onClick={() => setAddressType("residential")}
+              onClick={() => confirmType("residential")}
             >
               Residential
             </s-button>
             <s-button
               variant={addressType === "commercial" ? "primary" : "secondary"}
-              onClick={() => setAddressType("commercial")}
+              onClick={() => confirmType("commercial")}
             >
               Commercial
             </s-button>
