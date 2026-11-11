@@ -1,0 +1,9 @@
+{
+  "_note": "Box presets shown as one-click buttons on the shipment screen. Dimensions in cm, weight in kg. weightKg is a starting value (empty box + typical contents); staff can overwrite it per box. Replace these with your real cartons.",
+  "presets": [
+    { "name": "Small", "lengthCm": 30, "widthCm": 25, "heightCm": 20, "weightKg": 2 },
+    { "name": "Medium", "lengthCm": 45, "widthCm": 35, "heightCm": 30, "weightKg": 6 },
+    { "name": "Large", "lengthCm": 60, "widthCm": 45, "heightCm": 45, "weightKg": 12 },
+    { "name": "Long", "lengthCm": 120, "widthCm": 30, "heightCm": 30, "weightKg": 15 }
+  ]
+}

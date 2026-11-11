@@ -1,0 +1,4 @@
+{
+  "_note": "OT (local courier, no API). orderUrlTemplate is the OT page that opens with a Shopify order pre-filled - the same page OT's order action button opens in Shopify admin. URL pattern TBD after recon. Placeholders: {orderId} = numeric Shopify order id, {orderName} = order name without '#'. Leave empty until known; the app then falls back to opening the order in Shopify so staff can click OT's action button.",
+  "orderUrlTemplate": ""
+}

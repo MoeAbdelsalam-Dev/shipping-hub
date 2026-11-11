@@ -1,0 +1,25 @@
+{
+  "_note": "Starting list - REVIEW BEFORE USE. An order is GTA when the ship-to country is CA and the first 3 characters of the postal code (the FSA) start with one of 'prefixes' or exactly match one of 'fsas'. Add or remove FSAs to match the area you actually deliver to yourselves.",
+  "prefixes": ["M"],
+  "fsas": {
+    "Durham (Pickering, Ajax, Whitby, Oshawa, Clarington)": [
+      "L1B", "L1C", "L1E", "L1G", "L1H", "L1J", "L1K", "L1L", "L1M", "L1N",
+      "L1P", "L1R", "L1S", "L1T", "L1V", "L1W", "L1X", "L1Y", "L1Z"
+    ],
+    "York (Markham, Richmond Hill, Vaughan, Aurora, Newmarket, Stouffville)": [
+      "L3P", "L3R", "L3S", "L3T", "L3X", "L3Y", "L4A", "L4B", "L4C", "L4E",
+      "L4G", "L4H", "L4J", "L4K", "L4L", "L4S", "L6A", "L6B", "L6C", "L6E",
+      "L6G", "L7B", "L9N"
+    ],
+    "Peel (Mississauga, Brampton, Caledon)": [
+      "L4T", "L4V", "L4W", "L4X", "L4Y", "L4Z", "L5A", "L5B", "L5C", "L5E",
+      "L5G", "L5H", "L5J", "L5K", "L5L", "L5M", "L5N", "L5R", "L5S", "L5T",
+      "L5V", "L5W", "L6P", "L6R", "L6S", "L6T", "L6V", "L6W", "L6X", "L6Y",
+      "L6Z", "L7A", "L7C", "L7E", "L7K"
+    ],
+    "Halton (Oakville, Burlington, Milton, Halton Hills)": [
+      "L6H", "L6J", "L6K", "L6L", "L6M", "L7G", "L7J", "L7L", "L7M", "L7N",
+      "L7P", "L7R", "L7S", "L7T", "L9E", "L9T"
+    ]
+  }
+}
