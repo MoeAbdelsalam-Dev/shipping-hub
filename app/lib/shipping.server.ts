@@ -7,6 +7,8 @@ import {
   recordConfirmation,
 } from "./classifier/index.server";
 import type { Classification } from "./classifier/types";
+import type { CourierHistory } from "./courier";
+import { getCourierHistory } from "./history.server";
 import { getOrder, orderNumericId, type AdminGraphql } from "./orders.server";
 import { otOrderUrl } from "./ot";
 
@@ -31,11 +33,18 @@ export async function loadShipment(admin: AdminGraphql, shop: string, id: string
   const order = await getOrder(admin, orderGid(id));
   if (!order) throw new Response("Order not found", { status: 404 });
 
-  const [draft, classification] = await Promise.all([
+  const [draft, classification, history] = await Promise.all([
     db.shipmentDraft.findUnique({
       where: { shop_orderId: { shop, orderId: order.id } },
     }),
     getCachedClassification(shop, order.shipTo),
+    getCourierHistory(admin, shop, order.customerId, order.id).catch(
+      (e: unknown): CourierHistory | null => {
+        // Message only: never log customer data.
+        console.error("Courier history failed:", e instanceof Error ? e.name : "error");
+        return null;
+      },
+    ),
   ]);
 
   return {
@@ -45,6 +54,7 @@ export async function loadShipment(admin: AdminGraphql, shop: string, id: string
     shopifyOrderUrl: `shopify://admin/orders/${orderNumericId(order.id)}`,
     presets: boxPresets,
     classification,
+    history,
     draft: draft
       ? {
           addressType: parseAddressType(draft.addressType),
@@ -115,7 +125,8 @@ export async function handleShipment(
       });
       return { ...base, classification };
     } catch (e) {
-      console.error("Address check failed:", e instanceof Error ? e.message : e);
+      // Error type only: messages from third-party APIs could echo the query.
+      console.error("Address check failed:", e instanceof Error ? e.name : "error");
       return { ...base, errors: ["Automatic address check failed — check manually."] };
     }
   }

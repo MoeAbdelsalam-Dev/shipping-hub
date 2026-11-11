@@ -41,14 +41,22 @@ interface Quote {
   totalCad: number;
   transitDays?: number;
 }
+interface CourierHistory {
+  previousOrders: number;
+  usual: { courier: string; count: number } | null;
+  last: { courier: string; date: string; orderName: string } | null;
+  guest: boolean;
+}
 interface Shipment {
   numericId: string;
+  history: CourierHistory | null;
   otUrl: string | null;
   presets: Preset[];
   classification: Classification | null;
   draft: { addressType: AddressType | null; boxes: Box[] } | null;
   order: {
     name: string;
+    email: string | null;
     zone: "GTA" | "Non-GTA";
     shipTo: {
       name: string;
@@ -94,6 +102,24 @@ async function api<T>(id: string, body?: Record<string, unknown>): Promise<T> {
   return (await res.json()) as T;
 }
 
+// Mirrors app/lib/courier.ts (kept local: no server code in this bundle).
+const courierKey = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+function historyLine(h: CourierHistory | null): string {
+  if (!h) return "Courier history unavailable.";
+  if (h.guest) return "Guest checkout — no customer history.";
+  if (h.previousOrders === 0) return "First-time customer";
+  const n = h.previousOrders;
+  return `${n} previous order${n === 1 ? "" : "s"} · Usually ships with: ${
+    h.usual ? `${h.usual.courier} (${h.usual.count} of ${n})` : "Unknown"
+  }`;
+}
+
+const TEST_BANNER = (
+  <s-banner tone="warning" heading="TEST MODE — read-only">
+    Nothing is shipped, booked, or changed.
+  </s-banner>
+);
+
 const inputValue = (e: Event) => (e.currentTarget as HTMLInputElement).value;
 
 function Extension() {
@@ -128,6 +154,7 @@ function Extension() {
   if (loadError) {
     return (
       <s-admin-action heading="Ship Desk">
+        {TEST_BANNER}
         <s-banner tone="critical">{loadError}</s-banner>
         <s-button slot="secondary-actions" onClick={() => shopify.close()}>
           Close
@@ -200,6 +227,7 @@ function Extension() {
   return (
     <s-admin-action heading={`Ship ${data.order.name}`}>
       <s-stack gap="base">
+        {TEST_BANNER}
         {/* ---- ship to + zone */}
         <s-stack gap="small-200">
           <s-stack direction="inline" gap="small-200" alignItems="center">
@@ -211,6 +239,13 @@ function Extension() {
             {a.address2 ? `, ${a.address2}` : ""}, {a.city} {a.provinceCode} {a.postalCode}
           </s-text>
           {a.phone ? <s-text color="subdued">Tel: {a.phone}</s-text> : null}
+          {data.order.email ? <s-text color="subdued">Email: {data.order.email}</s-text> : null}
+          <s-text color="subdued">
+            {historyLine(data.history)}
+            {data.history?.last
+              ? ` · Last: ${data.history.last.courier}, ${new Date(data.history.last.date).toLocaleDateString("en-CA")}, ${data.history.last.orderName}`
+              : ""}
+          </s-text>
           <s-stack direction="inline" gap="small-200">
             <s-link href={`https://www.google.com/search?q=${encodeURIComponent(q)}`} target="_blank">
               Google
@@ -401,10 +436,16 @@ function Extension() {
                 <s-stack gap="small-100">
                   <s-text type="strong">Quotes (mock — no real carriers yet)</s-text>
                   {quotes.map((qt) => (
-                    <s-text key={qt.id}>
-                      {qt.carrierName} {qt.serviceName}: ${qt.totalCad.toFixed(2)}
-                      {qt.transitDays ? ` · ${qt.transitDays} d` : ""}
-                    </s-text>
+                    <s-stack key={qt.id} direction="inline" gap="small-200" alignItems="center">
+                      <s-text>
+                        {qt.carrierName} {qt.serviceName}: ${qt.totalCad.toFixed(2)}
+                        {qt.transitDays ? ` · ${qt.transitDays} d` : ""}
+                      </s-text>
+                      {data.history?.usual &&
+                      courierKey(qt.carrierName) === courierKey(data.history.usual.courier) ? (
+                        <s-badge tone="info">Usual</s-badge>
+                      ) : null}
+                    </s-stack>
                   ))}
                 </s-stack>
               )

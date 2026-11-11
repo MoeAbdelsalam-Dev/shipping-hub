@@ -67,3 +67,22 @@ model AddressCheck {
 
   @@unique([shop, addressKey])
 }
+
+// A shipment our app booked (written by the booking flow from Phase 2 on;
+// nothing writes it in the read-only test build). Courier history prefers
+// this over Shopify's free-text fulfillment tracking company.
+model Shipment {
+  id                  String   @id @default(cuid())
+  shop                String
+  orderId             String // Shopify order GID
+  orderName           String
+  customerId          String? // Shopify customer GID
+  carrierId           String // adapter id, e.g. "ot", "ups", "canadapost", "fedex"
+  carrierName         String // display name, e.g. "Canada Post" (OT: the sub-courier)
+  serviceName         String
+  trackingNumbersJson String   @default("[]")
+  bookedAt            DateTime @default(now())
+
+  @@index([shop, orderId])
+  @@index([shop, customerId])
+}

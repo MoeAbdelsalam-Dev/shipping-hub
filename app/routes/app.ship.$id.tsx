@@ -6,6 +6,8 @@ import type {
 } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { AddressCheckPanel } from "../components/AddressCheckPanel";
+import { TestModeBanner } from "../components/TestModeBanner";
+import { historySummary, isUsualCourier } from "../lib/courier";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -63,7 +65,7 @@ function addressQuery(a: {
 }
 
 export default function ShipOrder() {
-  const { order, otUrl, shopifyOrderUrl, presets, draft, classification: cached } =
+  const { order, otUrl, shopifyOrderUrl, presets, draft, classification: cached, history } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const checkFetcher = useFetcher<typeof action>();
@@ -163,6 +165,8 @@ export default function ShipOrder() {
         Orders to ship
       </s-link>
 
+      <TestModeBanner />
+
       {/* ---------------- Ship-to + address type */}
       <s-section heading="Ship to">
         <s-stack gap="base">
@@ -185,6 +189,25 @@ export default function ShipOrder() {
               {a.city} {a.provinceCode} {a.postalCode} {a.countryCode}
             </s-paragraph>
             {a.phone ? <s-paragraph>Tel: {a.phone}</s-paragraph> : null}
+            {order.email ? <s-paragraph>Email: {order.email}</s-paragraph> : null}
+          </s-box>
+
+          {/* Courier history: information only, never decides res/com. */}
+          <s-box padding="small" background="subdued" borderRadius="base">
+            <s-stack gap="small-100">
+              <s-text type="strong">
+                {history ? historySummary(history) : "Courier history unavailable."}
+              </s-text>
+              {history?.last ? (
+                <s-text color="subdued">
+                  Last shipment: {history.last.courier} ·{" "}
+                  {new Date(history.last.date).toLocaleDateString("en-CA")} ·{" "}
+                  {history.last.orderName}
+                  {history.last.trackingNumbers[0] ? ` · ${history.last.trackingNumbers[0]}` : ""}
+                </s-text>
+              ) : null}
+              <s-text color="subdued">Based on recent orders only (about 60 days).</s-text>
+            </s-stack>
           </s-box>
 
           <s-stack direction="inline" gap="small-200">
@@ -415,7 +438,15 @@ export default function ShipOrder() {
               <s-table-body>
                 {quotes.map((qt) => (
                   <s-table-row key={qt.id}>
-                    <s-table-cell>{qt.carrierName}</s-table-cell>
+                    <s-table-cell>
+                      {qt.carrierName}
+                      {isUsualCourier(qt.carrierName, history?.usual?.courier) ? (
+                        <>
+                          {" "}
+                          <s-badge tone="info">Usual</s-badge>
+                        </>
+                      ) : null}
+                    </s-table-cell>
                     <s-table-cell>{qt.serviceName}</s-table-cell>
                     <s-table-cell>{qt.transitDays ?? "—"}</s-table-cell>
                     <s-table-cell>

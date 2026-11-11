@@ -41,6 +41,69 @@ quotes flow.
   Container start runs `prisma migrate deploy` then the server.
 - Node >= 22.12 (some deps need >= 22.15).
 
+## TEST MODE — read-only build (current)
+
+The app is installed on the real store as a **read-only test build**:
+
+- Scopes: `read_orders,read_customers` only (`shopify.app.toml`,
+  `.env.example`). No write scopes. Do not add any until test mode ends.
+- No Shopify mutations anywhere in the code (the old GTA tag sync —
+  `tagsAdd`/`tagsRemove`, needing `write_orders` — was removed).
+- No carrier or OT calls: only the mock carrier is registered (local maths,
+  no network); `carriers/ot.ts` is an unregistered stub; "Print in OT" is a
+  plain link staff click.
+- Yellow `TestModeBanner` on every page and in the order modal: "TEST MODE —
+  read-only. Nothing is shipped, booked, or changed."
+- Our own database is still written (shipment drafts, address-check cache,
+  staff confirmations) — that is app state, not store data.
+- Outgoing network calls: Shopify Admin GraphQL (queries only); Brave Search
+  + Claude API only if their keys are set and only when staff click "Check
+  address"; the order modal → our own `/api/ship/:id`. Google/Maps/evidence
+  links open in the staff member's browser, not from our server.
+
+## Order data we read
+
+Per order (`app/lib/orders.server.ts`): order number, contact **email**,
+contact phone, full shipping address incl. **company**, **address2/unit**,
+shipping phone, line items, customer id.
+
+`ShipOrder` (carriers/types.ts) carries `orderNumber` and `email` to every
+adapter:
+- **orderNumber** goes in the carrier's **reference** field (Canada Post, OT,
+  UPS, FedEx) so labels/invoices match back to the Shopify order.
+- **email** is passed to the carrier for its tracking notifications only.
+
+### Protected customer data (required for name/address/email/phone)
+
+Shopify hides these fields unless the app has protected customer data access.
+Setup for this single-store custom app:
+
+1. Shopify Dev Dashboard (or Partner Dashboard) → this app → **API access** →
+   **Protected customer data access** → Request access.
+2. Select **Protected customer data**, then the fields **Name, Email, Phone,
+   Address**. Reason for each: "Shipping orders — create labels and carrier
+   notifications".
+3. Fill in the data-protection questions (we store only what shipping needs;
+   no addresses in logs; data stays in our Railway DB).
+4. Save, then reinstall/re-auth the app on the store if Shopify asks
+   (`npm run deploy` pushes the scope change; open the app to accept it).
+5. Check: an order on the shipment screen shows name, address, email and
+   phone instead of blanks.
+
+### Customer courier history (information only)
+
+`app/lib/history.server.ts` reads the customer's last 10 orders and each
+order's latest fulfillment `trackingInfo { company number }`. Our own
+`Shipment` rows (written when the app books, Phase 2+) win over Shopify's
+free-text tracking company. Blank / "Other" → "Unknown". Shown as "First-time
+customer" or "N previous orders · Usually ships with: X (x of N)" plus the
+last shipment (courier, date, order number). The quotes list marks the
+customer's usual courier with a "Usual" badge.
+
+- History **never** sets or suggests residential/commercial.
+- We do **not** request `read_all_orders`, so Shopify only returns roughly the
+  last **60 days** of orders; older history is invisible.
+
 ## Entry point
 
 Staff start from the **Shopify order page → More actions → "Ship with Ship
@@ -73,15 +136,19 @@ app/
   lib/gta.ts        fsaOf(), zoneFor() — pure, safe on client and server
   lib/boxes.ts      presets, parseBoxes() (sanitizes form input), MAX_BOXES = 99
   lib/ot.ts         otOrderUrl() from config/ot.json
-  lib/orders.server.ts   Admin GraphQL: listUnfulfilledOrders, getOrder, syncZoneTags
+  lib/orders.server.ts   Admin GraphQL (queries only): listUnfulfilledOrders, getOrder
   lib/shipping.server.ts loadShipment / handleShipment — shared by page + API
+  lib/history.server.ts  Customer courier history (last 10 orders + our Shipment rows)
+  lib/courier.ts         normalizeCourier, isUsualCourier, historySummary (browser-safe)
+  components/TestModeBanner.tsx  Yellow read-only banner (every page)
   lib/classifier/        Address classifier (search.server, judge.server, index.server, types)
   components/AddressCheckPanel.tsx  Verdict + evidence + Confirm (full page)
-  routes/app._index.tsx  Orders to ship (list, GTA filter, "save tags to Shopify")
+  routes/app._index.tsx  Orders to ship (list, GTA filter) — secondary entry point
   routes/app.ship.$id.tsx  Shipment screen for one order (id = numeric order id)
   routes/api.ship.$id.tsx  JSON API for the order-page extension
 prisma/schema.prisma  Session (Shopify), ShipmentDraft (per-order boxes/address type),
-                      AddressCheck (classifier cache + last staff confirmation)
+                      AddressCheck (classifier cache + last staff confirmation),
+                      Shipment (bookings made by the app; courier history source)
 ```
 
 ## Data flow (shipment screen)
@@ -170,14 +237,16 @@ commercial (via the second search), anything else → unsure.
 
 ## Phases
 
-1. **Foundation (done)** — unfulfilled order list, GTA/Non-GTA zoning from
-   FSA list, shipment screen with boxes, presets, Duplicate ×N,
+1. **Foundation (done, read-only test build)** — unfulfilled order list,
+   GTA/Non-GTA zoning from FSA list, order data incl. email + courier history,
+   shipment screen with boxes, presets, Duplicate ×N,
    Residential/Commercial, "Open in OT" step for GTA residential, carrier
    interface + mock quotes, saved drafts, **order-page action entry point**.
 2. **OT automation** — recon, choose Playwright vs Chrome extension, implement
    `carriers/ot.ts` (quotes from OT sub-couriers, book, OT labels for all
-   boxes), `Shipment` table for bookings, create the Shopify fulfillment with
-   tracking numbers (needs fulfillment scopes). Fill in the OT URL pattern.
+   boxes), write `Shipment` rows on booking (carrier name feeds courier
+   history), create the Shopify fulfillment with tracking numbers (needs
+   fulfillment write scopes — ends test mode). Fill in the OT URL pattern.
 3. **Address classifier (built, mock mode)** — web search + Claude suggest
    Residential/Commercial/Unsure with evidence; staff confirm. Goes live when
    `BRAVE_SEARCH_API_KEY` and `ANTHROPIC_API_KEY` are set.
@@ -202,7 +271,8 @@ commercial (via the second search), anything else → unsure.
   list, box presets or OT URL must not require touching TypeScript.
 - Money in CAD with 2 decimals; dimensions cm, weight kg, everywhere.
 - New tables → `npx prisma migrate dev --name <what>`; commit the migration.
-- Customer addresses are PII: no addresses in logs or URLs we control. They
+- Customer data is PII: never log addresses, names, emails or phone numbers
+  (log error types/status codes only), and no PII in URLs we control. They
   go only to: the carrier being quoted, Brave Search + the Claude API (address
   classifier, staff-triggered), and Google lookups the staff member clicks.
 - Secrets/API keys only via env vars (Railway variables), never in code or config/.

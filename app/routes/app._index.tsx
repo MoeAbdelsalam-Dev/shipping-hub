@@ -1,20 +1,12 @@
-import { useEffect, useState } from "react";
-import type {
-  ActionFunctionArgs,
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+import { useState } from "react";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import {
-  listUnfulfilledOrders,
-  orderNumericId,
-  syncZoneTags,
-} from "../lib/orders.server";
+import { listUnfulfilledOrders, orderNumericId } from "../lib/orders.server";
+import { TestModeBanner } from "../components/TestModeBanner";
 import type { Zone } from "../lib/gta";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -37,7 +29,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         createdAt: o.createdAt,
         fulfillmentStatus: o.fulfillmentStatus,
         zone: o.zone,
-        zoneTagged: o.tags.includes(o.zone),
         shipToName: o.shipTo.company || o.shipTo.name,
         city: o.shipTo.city,
         province: o.shipTo.provinceCode,
@@ -50,30 +41,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
-  const orders = await listUnfulfilledOrders(admin);
-  const changed = await syncZoneTags(admin, orders);
-  return { changed };
-};
-
 type Filter = "All" | Zone;
 
 export default function OrdersToShip() {
   const { orders } = useLoaderData<typeof loader>();
-  const tagFetcher = useFetcher<typeof action>();
-  const shopify = useAppBridge();
   const [filter, setFilter] = useState<Filter>("All");
-
-  useEffect(() => {
-    if (tagFetcher.data) {
-      shopify.toast.show(
-        tagFetcher.data.changed
-          ? `Tagged ${tagFetcher.data.changed} order(s) in Shopify`
-          : "All orders already tagged",
-      );
-    }
-  }, [tagFetcher.data, shopify]);
 
   const counts = {
     All: orders.length,
@@ -82,17 +54,10 @@ export default function OrdersToShip() {
   };
   const shown =
     filter === "All" ? orders : orders.filter((o) => o.zone === filter);
-  const syncing = tagFetcher.state !== "idle";
 
   return (
     <s-page heading="Orders to ship">
-      <s-button
-        slot="primary-action"
-        onClick={() => tagFetcher.submit({}, { method: "POST" })}
-        {...(syncing ? { loading: true } : {})}
-      >
-        Save GTA / Non-GTA tags to Shopify
-      </s-button>
+      <TestModeBanner />
 
       <s-section>
         <s-stack direction="inline" gap="small-200">

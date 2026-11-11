@@ -17,6 +17,8 @@ export interface OrderSummary extends ShipOrder {
   /** Total line item quantity, to hint how many boxes to expect. */
   itemCount: number;
   lineItems: { name: string; sku: string | null; quantity: number }[];
+  /** Shopify customer GID, null for guest checkouts. */
+  customerId: string | null;
 }
 
 const ORDER_FIELDS = `#graphql
@@ -26,6 +28,9 @@ const ORDER_FIELDS = `#graphql
     createdAt
     displayFulfillmentStatus
     tags
+    email
+    phone
+    customer { id }
     shippingAddress {
       name
       company
@@ -49,6 +54,9 @@ interface RawOrder {
   createdAt: string;
   displayFulfillmentStatus: string;
   tags: string[];
+  email: string | null;
+  phone: string | null;
+  customer: { id: string } | null;
   shippingAddress: {
     name: string | null;
     company: string | null;
@@ -76,7 +84,8 @@ function toSummary(o: RawOrder): OrderSummary {
     provinceCode: a?.provinceCode ?? "",
     postalCode: a?.zip ?? "",
     countryCode: a?.countryCodeV2 ?? "",
-    phone: a?.phone,
+    // Shipping-address phone first, else the order's contact phone.
+    phone: a?.phone || o.phone,
   };
   const lineItems = o.lineItems.nodes
     .filter((li) => li.currentQuantity > 0)
@@ -84,6 +93,9 @@ function toSummary(o: RawOrder): OrderSummary {
   return {
     id: o.id,
     name: o.name,
+    orderNumber: o.name.replace(/^#/, ""),
+    email: o.email,
+    customerId: o.customer?.id ?? null,
     createdAt: o.createdAt,
     fulfillmentStatus: o.displayFulfillmentStatus,
     tags: o.tags,
@@ -94,7 +106,7 @@ function toSummary(o: RawOrder): OrderSummary {
   };
 }
 
-async function gql<T>(
+export async function gql<T>(
   admin: AdminGraphql,
   query: string,
   variables?: Record<string, unknown>,
@@ -147,41 +159,10 @@ export async function getOrder(
   return data.order ? toSummary(data.order) : null;
 }
 
-/** Put exactly one of GTA / Non-GTA on each order in Shopify. */
-export async function syncZoneTags(
-  admin: AdminGraphql,
-  orders: OrderSummary[],
-): Promise<number> {
-  let changed = 0;
-  for (const o of orders) {
-    const wrong = o.zone === "GTA" ? "Non-GTA" : "GTA";
-    const needsAdd = !o.tags.includes(o.zone);
-    const needsRemove = o.tags.includes(wrong);
-    if (!needsAdd && !needsRemove) continue;
-    if (needsRemove) {
-      await gql(
-        admin,
-        `#graphql
-          mutation RemoveZoneTag($id: ID!, $tags: [String!]!) {
-            tagsRemove(id: $id, tags: $tags) { userErrors { message } }
-          }`,
-        { id: o.id, tags: [wrong] },
-      );
-    }
-    if (needsAdd) {
-      await gql(
-        admin,
-        `#graphql
-          mutation AddZoneTag($id: ID!, $tags: [String!]!) {
-            tagsAdd(id: $id, tags: $tags) { userErrors { message } }
-          }`,
-        { id: o.id, tags: [o.zone] },
-      );
-    }
-    changed++;
-  }
-  return changed;
-}
+// TEST MODE: the app is read-only (scopes read_orders, read_customers).
+// The old "Save GTA / Non-GTA tags to Shopify" mutation (tagsAdd/tagsRemove)
+// was removed on purpose — see git history before re-adding it, and it needs
+// write_orders.
 
 /** Numeric part of gid://shopify/Order/123 -> "123" (for URLs). */
 export function orderNumericId(gid: string): string {

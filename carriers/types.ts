@@ -27,6 +27,17 @@ export interface ShipOrder {
   id: string;
   /** Display name, e.g. #1001 */
   name: string;
+  /**
+   * Order number without "#", e.g. "1001". Every adapter puts this in the
+   * carrier's reference field (Canada Post, OT, UPS, FedEx) so labels and
+   * invoices can be matched back to the Shopify order.
+   */
+  orderNumber: string;
+  /**
+   * Customer contact email from the order. Used only for the carrier's own
+   * tracking notifications. Never log it.
+   */
+  email: string | null;
   shipTo: ShipAddress;
 }
 
