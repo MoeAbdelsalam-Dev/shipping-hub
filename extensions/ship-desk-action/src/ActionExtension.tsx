@@ -111,6 +111,8 @@ const LABEL: Record<Verdict, string> = {
   commercial: "Commercial",
   unsure: "Unsure",
 };
+/** Box editor columns: #, L, W, H, kg, Remove. */
+const BOX_COLUMNS = "28px 1fr 1fr 1fr 1fr 64px";
 /** Above this many boxes the modal gets cramped: suggest the full page. */
 const MODAL_BOX_LIMIT = 6;
 const MAX_BOXES = 99;
@@ -164,6 +166,32 @@ const FIELD_LABELS: [keyof MappedFields, string][] = [
   ["reference", "Reference"],
   ["signature", "Signature"],
 ];
+// Mirrors bestQuotes() in app/lib/carrierRows.ts (kept local: no server code here).
+interface Best {
+  carrierName: string;
+  quote: Quote;
+}
+function bestQuotes(rows: CarrierRow[]): { cheapest: Best | null; fastest: Best | null } {
+  const all = rows.flatMap((r) => r.quotes.map((quote) => ({ carrierName: r.carrierName, quote })));
+  if (all.length === 0) return { cheapest: null, fastest: null };
+  const cheapest = all.reduce((a, b) => (b.quote.totalCad < a.quote.totalCad ? b : a));
+  const timed = all.filter((x) => x.quote.transitDays !== undefined);
+  const fastest = timed.length
+    ? timed.reduce((a, b) => {
+        const da = a.quote.transitDays!;
+        const db = b.quote.transitDays!;
+        return db < da || (db === da && b.quote.totalCad < a.quote.totalCad) ? b : a;
+      })
+    : null;
+  return { cheapest, fastest };
+}
+function bestText({ carrierName, quote: q }: Best): string {
+  const days = q.transitDays === undefined ? "—" : String(q.transitDays);
+  const plural = q.transitDays === 1 ? "" : "s";
+  const price = "$" + q.totalCad.toFixed(2);
+  return `${carrierName} · ${q.serviceName} · ${days} day${plural} · ${price}${q.sample ? " (sample)" : ""}`;
+}
+
 const show = (v: MappedFields[keyof MappedFields]) =>
   v === null || v === "" ? "—" : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v);
 
@@ -294,6 +322,7 @@ function Extension() {
     );
   };
   const totalKg = boxes.reduce((s, b) => s + (b.weightKg || 0), 0);
+  const best = bestQuotes(rows);
 
   return (
     <s-admin-action heading={`Ship ${data.order.name}`}>
@@ -468,45 +497,41 @@ function Extension() {
               ) : null}
 
               {boxes.length > 0 ? (
-                <s-table>
-                  <s-table-header-row>
-                    <s-table-header>#</s-table-header>
-                    <s-table-header>L cm</s-table-header>
-                    <s-table-header>W cm</s-table-header>
-                    <s-table-header>H cm</s-table-header>
-                    <s-table-header>kg</s-table-header>
-                    <s-table-header>Remove</s-table-header>
-                  </s-table-header-row>
-                  <s-table-body>
-                    {boxes.map((b, i) => (
-                      <s-table-row key={i}>
-                        <s-table-cell>{i + 1}</s-table-cell>
-                        {(["lengthCm", "widthCm", "heightCm", "weightKg"] as const).map((f) => (
-                          <s-table-cell key={f}>
-                            <s-number-field
-                              label={f}
-                              labelAccessibilityVisibility="exclusive"
-                              value={b[f] ? String(b[f]) : ""}
-                              min={0}
-                              step={f === "weightKg" ? 0.1 : 1}
-                              onInput={(e: Event) => setField(i, f, inputValue(e))}
-                            />
-                          </s-table-cell>
-                        ))}
-                        <s-table-cell>
-                          <s-button
-                            variant="tertiary"
-                            tone="critical"
-                            accessibilityLabel={`Remove box ${i + 1}`}
-                            onClick={() => setBoxes((bs) => bs.filter((_, j) => j !== i))}
-                          >
-                            ✕
-                          </s-button>
-                        </s-table-cell>
-                      </s-table-row>
+                // A fixed-column grid, not <s-table>: in the narrow modal the table
+                // switches to a list layout and headers stop lining up with cells.
+                <s-stack gap="small-100">
+                  <s-grid gridTemplateColumns={BOX_COLUMNS} gap="small-200" alignItems="center">
+                    {["#", "L", "W", "H", "kg", "Remove"].map((h) => (
+                      <s-text key={h} type="strong">
+                        {h}
+                      </s-text>
                     ))}
-                  </s-table-body>
-                </s-table>
+                  </s-grid>
+                  {boxes.map((b, i) => (
+                    <s-grid key={i} gridTemplateColumns={BOX_COLUMNS} gap="small-200" alignItems="center">
+                      <s-text>{i + 1}</s-text>
+                      {(["lengthCm", "widthCm", "heightCm", "weightKg"] as const).map((f) => (
+                        <s-number-field
+                          key={f}
+                          label={f}
+                          labelAccessibilityVisibility="exclusive"
+                          value={b[f] ? String(b[f]) : ""}
+                          min={0}
+                          step={f === "weightKg" ? 0.1 : 1}
+                          onInput={(e: Event) => setField(i, f, inputValue(e))}
+                        />
+                      ))}
+                      <s-button
+                        variant="tertiary"
+                        tone="critical"
+                        accessibilityLabel={`Remove box ${i + 1}`}
+                        onClick={() => setBoxes((bs) => bs.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </s-button>
+                    </s-grid>
+                  ))}
+                </s-stack>
               ) : (
                 <s-text color="subdued">No boxes yet — add a preset.</s-text>
               )}
@@ -554,6 +579,22 @@ function Extension() {
         {/* ---- carrier rows */}
         {route === "quotes" ? (
           <s-stack gap="small-200">
+            {best.cheapest ? (
+              <s-box padding="small" border="base" borderRadius="base">
+                <s-stack gap="small-100">
+                  <s-text>
+                    <s-text type="strong">Best price: </s-text>
+                    {bestText(best.cheapest)}
+                  </s-text>
+                  {best.fastest ? (
+                    <s-text>
+                      <s-text type="strong">Fastest: </s-text>
+                      {bestText(best.fastest)}
+                    </s-text>
+                  ) : null}
+                </s-stack>
+              </s-box>
+            ) : null}
             {rows.map((row) => (
               <s-box key={row.carrierId} padding="small" border="base" borderRadius="base">
                 <s-stack gap="small-100">
@@ -577,6 +618,9 @@ function Extension() {
                           {qt.serviceName}: ${qt.totalCad.toFixed(2)}
                           {qt.transitDays ? ` · ${qt.transitDays} d` : ""}
                         </s-text>
+                        {best.cheapest?.quote.id === qt.id ? (
+                          <s-badge tone="success">Cheapest</s-badge>
+                        ) : null}
                         {qt.sample ? <s-badge tone="warning">SAMPLE</s-badge> : null}
                         <s-button disabled interestFor={tipId}>
                           Print labels

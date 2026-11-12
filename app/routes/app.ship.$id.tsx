@@ -66,20 +66,22 @@ const plainBox = (r: Row): Box => ({
  * React 18 does not wire onChange on custom elements, so listen for the
  * checkbox's change event directly.
  */
+// Callback ref: the checkbox may mount later (e.g. after Residential/Commercial is
+// chosen), so the listener is attached whenever the element appears.
 function useCheckbox(onChange: (checked: boolean) => void) {
-  const ref = useRef<HTMLElementTagNameMap["s-checkbox"]>(null);
   const cb = useRef(onChange);
   useEffect(() => {
     cb.current = onChange;
   });
-  useEffect(() => {
-    const el = ref.current;
+  const cleanup = useRef<(() => void) | null>(null);
+  return useCallback((el: HTMLElementTagNameMap["s-checkbox"] | null) => {
+    cleanup.current?.();
+    cleanup.current = null;
     if (!el) return;
     const h = () => cb.current(Boolean(el.checked));
     el.addEventListener("change", h);
-    return () => el.removeEventListener("change", h);
+    cleanup.current = () => el.removeEventListener("change", h);
   }, []);
-  return ref;
 }
 
 export default function ShipOrder() {
@@ -433,18 +435,22 @@ export default function ShipOrder() {
                           </s-table-cell>
                           {(["lengthCm", "widthCm", "heightCm", "weightKg"] as const).map((f) => (
                             <s-table-cell key={f}>
-                              <s-number-field
-                                label={f}
-                                labelAccessibilityVisibility="exclusive"
-                                value={r[f] ? String(r[f]) : ""}
-                                min={0}
-                                step={f === "weightKg" ? 0.1 : 1}
-                                onInput={(e) => updateRow(r.key, f, e.currentTarget.value)}
-                              />
+                              {/* Narrow inputs so the table fits ~1280px without scrolling */}
+                              <s-box inlineSize="84px">
+                                <s-number-field
+                                  label={f}
+                                  labelAccessibilityVisibility="exclusive"
+                                  value={r[f] ? String(r[f]) : ""}
+                                  min={0}
+                                  step={f === "weightKg" ? 0.1 : 1}
+                                  onInput={(e) => updateRow(r.key, f, e.currentTarget.value)}
+                                />
+                              </s-box>
                             </s-table-cell>
                           ))}
                           <s-table-cell>
-                            <s-stack direction="inline" gap="small-200" alignItems="center">
+                            <s-stack direction="inline" gap="small-100" alignItems="center">
+                              <s-box inlineSize="72px">
                               <s-number-field
                                 label="Copies"
                                 labelAccessibilityVisibility="exclusive"
@@ -453,11 +459,16 @@ export default function ShipOrder() {
                                 min={1}
                                 max={MAX_BOXES}
                                 step={1}
-                                onInput={(e) =>
-                                  setDupCount((d) => ({ ...d, [r.key]: e.currentTarget.value }))
-                                }
+                                onInput={(e) => {
+                                  const v = e.currentTarget.value;
+                                  setDupCount((d) => ({ ...d, [r.key]: v }));
+                                }}
                               />
+                              </s-box>
                               <s-button
+                                variant="tertiary"
+                                icon="duplicate"
+                                accessibilityLabel={`Duplicate box ${i + 1}`}
                                 onClick={() => duplicateRow(r.key)}
                                 {...(room <= 0 ? { disabled: true } : {})}
                               >

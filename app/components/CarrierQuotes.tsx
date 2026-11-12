@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { Quote } from "../../carriers/types";
-import { needsText, type CarrierRow } from "../lib/carrierRows";
+import { bestQuotes, needsText, type BestQuote, type CarrierRow } from "../lib/carrierRows";
 import type { MappedFields } from "../lib/rules";
 
 interface Props {
@@ -14,9 +14,30 @@ interface Props {
 }
 
 /** One row per carrier (UPS, Canada Post, OT) with status, quotes and actions. */
+function bestLine(label: string, b: BestQuote) {
+  const q = b.quote;
+  const days = q.transitDays === undefined ? "—" : String(q.transitDays);
+  return (
+    <s-text>
+      <s-text type="strong">{label}: </s-text>
+      {`${b.carrierName} · ${q.serviceName} · ${days} day${q.transitDays === 1 ? "" : "s"} · $${q.totalCad.toFixed(2)}`}
+      {q.sample ? " (sample)" : ""}
+    </s-text>
+  );
+}
+
 export function CarrierQuotes({ rows, quoted, sample, canPreview, onPreviewLabel }: Props) {
+  const { cheapest, fastest } = bestQuotes(rows);
   return (
     <s-stack gap="base">
+      {cheapest ? (
+        <s-box padding="base" border="base" borderRadius="base" background="subdued">
+          <s-stack gap="small-100">
+            {bestLine("Best price", cheapest)}
+            {fastest ? bestLine("Fastest", fastest) : null}
+          </s-stack>
+        </s-box>
+      ) : null}
       {rows.map((row) => (
         <s-box key={row.carrierId} padding="base" border="base" borderRadius="base">
           <s-stack gap="small-200">
@@ -62,6 +83,12 @@ export function CarrierQuotes({ rows, quoted, sample, canPreview, onPreviewLabel
                       <s-table-row key={q.id}>
                         <s-table-cell>
                           {q.serviceName}
+                          {cheapest && q.id === cheapest.quote.id ? (
+                            <>
+                              {" "}
+                              <s-badge tone="success">Cheapest</s-badge>
+                            </>
+                          ) : null}
                           {q.sample ? (
                             <>
                               {" "}
