@@ -61,6 +61,13 @@ export interface Quote {
   transitDays?: number;
   /** Surcharges etc., for display only. */
   breakdown?: { label: string; amountCad: number }[];
+  /** True for "Preview with sample prices" quotes — never bookable. */
+  sample?: boolean;
+}
+
+export interface QuoteOptions {
+  /** Staff ticked "Signature required" (UPS: Adult Signature Required, CP: Signature). */
+  signatureRequired?: boolean;
 }
 
 export interface Booking {
@@ -82,10 +89,20 @@ export interface Label {
 export interface CarrierAdapter {
   readonly id: string;
   readonly name: string;
+  /** Env vars that must all be set for this carrier to count as connected. */
+  readonly requiredEnv: string[];
+  /** All requiredEnv present. Never exposes the values. */
+  isConnected(): boolean;
+  /**
+   * order.shipTo is already carrier-specific (PO Box rule applied, see
+   * app/lib/rules.ts). Put order.orderNumber in the reference field when the
+   * carrier mapping says so (config/carrier_fields.json).
+   */
   getQuotes(
     order: ShipOrder,
     boxes: Box[],
     addressType: AddressType,
+    options?: QuoteOptions,
   ): Promise<Quote[]>;
   book(quoteId: string): Promise<Booking>;
   getLabels(shipmentId: string): Promise<Label[]>;

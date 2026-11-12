@@ -4,16 +4,16 @@ import { useEffect, useState } from "preact/hooks";
 /**
  * Order page → More actions → "Ship with Ship Desk".
  * Talks to our backend at /api/ship/:id (app/routes/api.ship.$id.tsx); Shopify
- * adds the session token to relative fetches from admin extensions.
- * The full-screen page (/app/ship/:id) has the same features with more room.
+ * adds the session token to relative fetches from admin extensions. All rules
+ * (GTA, PO Box, field mapping, carrier status) are computed on the server, so
+ * this modal and the full page (/app/ship/:id) always agree.
  */
 
 export default async () => {
   render(<Extension />, document.body);
 };
 
-// ---- response shapes (mirror app/lib/shipping.server.ts; kept local so this
-// bundle doesn't pull in server code)
+// ---- response shapes (mirror app/lib/*; kept local so this bundle has no server code)
 type AddressType = "residential" | "commercial";
 type Verdict = AddressType | "unsure";
 interface Box {
@@ -31,15 +31,40 @@ interface Classification {
   confidence: number;
   reason: string;
   evidence: { title: string; url: string; snippet: string }[];
-  source: "live" | "mock";
-  confirmedType: AddressType | null;
 }
 interface Quote {
   id: string;
-  carrierName: string;
   serviceName: string;
   totalCad: number;
   transitDays?: number;
+  sample?: boolean;
+}
+interface MappedFields {
+  name: string;
+  attention: string | null;
+  company: string | null;
+  address1: string;
+  address2: string | null;
+  city: string;
+  provinceCode: string;
+  postalCode: string;
+  phone: string | null;
+  email: string | null;
+  reference: string | null;
+  residential: boolean | null;
+  signature: string | null;
+}
+interface CarrierRow {
+  carrierId: string;
+  carrierName: string;
+  status: "connected" | "not-connected" | "unavailable" | "error";
+  needs: string[];
+  setupWhere: string;
+  message: string | null;
+  usual: boolean;
+  fields: MappedFields | null;
+  poBoxNote: string | null;
+  quotes: Quote[];
 }
 interface CourierHistory {
   previousOrders: number;
@@ -49,11 +74,14 @@ interface CourierHistory {
 }
 interface Shipment {
   numericId: string;
-  history: CourierHistory | null;
   otUrl: string | null;
   presets: Preset[];
   classification: Classification | null;
-  draft: { addressType: AddressType | null; boxes: Box[] } | null;
+  classifierNeeds: string[];
+  history: CourierHistory | null;
+  poBox: { isPoBox: boolean; poBoxOnly: boolean };
+  rows: CarrierRow[];
+  draft: { addressType: AddressType | null; signatureRequired: boolean; boxes: Box[] } | null;
   order: {
     name: string;
     email: string | null;
@@ -66,14 +94,14 @@ interface Shipment {
       city: string;
       provinceCode: string;
       postalCode: string;
-      countryCode: string;
       phone?: string | null;
     };
   };
 }
 interface ShipResponse {
   addressType: AddressType | null;
-  quotes: Quote[] | null;
+  rows: CarrierRow[] | null;
+  quoted: boolean;
   errors: string[];
   classification: Classification | null;
 }
@@ -102,8 +130,11 @@ async function api<T>(id: string, body?: Record<string, unknown>): Promise<T> {
   return (await res.json()) as T;
 }
 
-// Mirrors app/lib/courier.ts (kept local: no server code in this bundle).
-const courierKey = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, "");
+const inputValue = (e: Event) => (e.currentTarget as HTMLInputElement).value;
+const checkedValue = (e: Event) => Boolean((e.currentTarget as HTMLInputElement).checked);
+const validBox = (b: Box) =>
+  [b.lengthCm, b.widthCm, b.heightCm, b.weightKg].every((n) => Number.isFinite(n) && n > 0);
+
 function historyLine(h: CourierHistory | null): string {
   if (!h) return "Courier history unavailable.";
   if (h.guest) return "Guest checkout — no customer history.";
@@ -120,7 +151,21 @@ const TEST_BANNER = (
   </s-banner>
 );
 
-const inputValue = (e: Event) => (e.currentTarget as HTMLInputElement).value;
+const FIELD_LABELS: [keyof MappedFields, string][] = [
+  ["name", "Name"],
+  ["attention", "Attention"],
+  ["company", "Company"],
+  ["address1", "Address 1"],
+  ["address2", "Address 2"],
+  ["city", "City"],
+  ["postalCode", "Postal code"],
+  ["phone", "Phone"],
+  ["email", "Email"],
+  ["reference", "Reference"],
+  ["signature", "Signature"],
+];
+const show = (v: MappedFields[keyof MappedFields]) =>
+  v === null || v === "" ? "—" : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v);
 
 function Extension() {
   const id = orderIdFromData();
@@ -129,12 +174,16 @@ function Extension() {
   const [addressType, setAddressType] = useState<AddressType | null>(null);
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [dup, setDup] = useState("1");
+  const [signature, setSignature] = useState(false);
+  const [sample, setSample] = useState(false);
   const [classification, setClassification] = useState<Classification | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [quotes, setQuotes] = useState<Quote[] | null>(null);
+  const [rows, setRows] = useState<CarrierRow[]>([]);
+  const [quoted, setQuoted] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
+  const [showFields, setShowFields] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -146,7 +195,9 @@ function Extension() {
         setData(d);
         setAddressType(d.draft?.addressType ?? null);
         setBoxes(d.draft?.boxes ?? []);
+        setSignature(d.draft?.signatureRequired ?? false);
         setClassification(d.classification);
+        setRows(d.rows);
       })
       .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)));
   }, [id]);
@@ -168,12 +219,16 @@ function Extension() {
 
   const a = data.order.shipTo;
   const isGta = data.order.zone === "GTA";
-  const viaOt = isGta && addressType === "residential";
+  const route = !addressType
+    ? "needs-address-type"
+    : isGta && addressType === "residential"
+      ? "print-in-ot"
+      : "quotes";
   const q = [a.address1, a.address2, a.city, a.provinceCode, a.postalCode]
     .filter(Boolean)
     .join(", ");
   const fullScreen = `app:app/ship/${data.numericId}`;
-  const tooManyForModal = boxes.length > MODAL_BOX_LIMIT;
+  const boxesValid = boxes.length > 0 && boxes.every(validBox);
 
   const post = async (body: Record<string, unknown>) => {
     setErrors([]);
@@ -196,16 +251,27 @@ function Extension() {
 
   const confirm = async (t: AddressType) => {
     setAddressType(t);
-    setQuotes(null);
-    await post({ intent: "confirm", addressType: t }); // boxes left as saved
+    setQuoted(false);
+    const r = await post({ intent: "confirm", addressType: t }); // boxes left as saved
+    if (r?.rows) setRows(r.rows);
   };
 
-  const save = async (intent: "save" | "quote") => {
+  const save = async (
+    intent: "save" | "quote",
+    over: { signature?: boolean; sample?: boolean } = {},
+  ) => {
     setBusy(true);
-    const r = await post({ intent, addressType, boxes });
+    const r = await post({
+      intent,
+      addressType,
+      boxes,
+      signatureRequired: over.signature ?? signature,
+      sample: over.sample ?? sample,
+    });
     setBusy(false);
     if (!r) return;
-    setQuotes(r.quotes);
+    if (r.rows) setRows(r.rows);
+    setQuoted(r.quoted);
     setErrors(r.errors);
     if (intent === "save") setSaved(true);
   };
@@ -219,7 +285,12 @@ function Extension() {
     setBoxes((bs) =>
       bs.length === 0
         ? bs
-        : [...bs, ...Array.from({ length: Math.min(n, MAX_BOXES - bs.length) }, () => ({ ...bs[bs.length - 1] }))],
+        : [
+            ...bs,
+            ...Array.from({ length: Math.min(n, MAX_BOXES - bs.length) }, () => ({
+              ...bs[bs.length - 1],
+            })),
+          ],
     );
   };
   const totalKg = boxes.reduce((s, b) => s + (b.weightKg || 0), 0);
@@ -228,10 +299,15 @@ function Extension() {
     <s-admin-action heading={`Ship ${data.order.name}`}>
       <s-stack gap="base">
         {TEST_BANNER}
-        {/* ---- ship to + zone */}
+
+        {/* ---- ship to + zone + history */}
         <s-stack gap="small-200">
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <s-badge tone={isGta ? "success" : "info"}>{data.order.zone}</s-badge>
+            {data.poBox.isPoBox ? <s-badge tone="info">PO Box → CP</s-badge> : null}
+            {data.poBox.poBoxOnly ? (
+              <s-badge tone="warning">PO Box only — Canada Post only</s-badge>
+            ) : null}
             {a.company ? <s-text type="strong">{a.company}</s-text> : null}
           </s-stack>
           <s-text>
@@ -279,7 +355,6 @@ function Extension() {
                 {classification.verdict !== "unsure" ? (
                   <s-text color="subdued">{Math.round(classification.confidence * 100)}%</s-text>
                 ) : null}
-                {classification.source === "mock" ? <s-badge>Demo data</s-badge> : null}
               </s-stack>
               <s-text>{classification.reason}</s-text>
               {classification.evidence.map((e, i) => (
@@ -301,10 +376,17 @@ function Extension() {
                   Confirm {LABEL[classification.verdict]}
                 </s-button>
               )}
-              <s-button variant="tertiary" onClick={() => check("reclassify")} loading={checking}>
-                Check again
-              </s-button>
+              {data.classifierNeeds.length === 0 ? (
+                <s-button variant="tertiary" onClick={() => check("reclassify")} loading={checking}>
+                  Check again
+                </s-button>
+              ) : null}
             </s-stack>
+          ) : data.classifierNeeds.length > 0 ? (
+            <s-text color="subdued">
+              Automatic address check not connected — needs {data.classifierNeeds.join(", ")}.{" "}
+              <s-link href="app:app/setup">Setup</s-link>
+            </s-text>
           ) : (
             <s-button onClick={() => check("classify")} loading={checking}>
               Check address automatically
@@ -330,128 +412,219 @@ function Extension() {
         </s-stack>
 
         {/* ---- next step */}
-        {!addressType ? (
+        {route === "needs-address-type" ? (
           <s-text color="subdued">Confirm Residential or Commercial to continue.</s-text>
-        ) : viaOt ? (
+        ) : null}
+
+        {route === "print-in-ot" ? (
           <s-banner tone="info" heading="Ships with OT">
-            GTA residential — no dimensions or weight needed. Print OT&apos;s labels in OT.
-            {data.otUrl ? null : " (Direct OT link not set up yet: close this and use OT's own action on this order.)"}
+            GTA residential — no quotes, dimensions or weight needed. Print OT&apos;s labels in
+            OT.
+            {data.otUrl
+              ? null
+              : " Press Print in OT, then use OT's own action under More actions on this order."}
           </s-banner>
-        ) : (
+        ) : null}
+
+        {route === "quotes" ? (
           <s-stack gap="small-200">
-            <s-stack direction="inline" gap="small-200">
-              {data.presets.map((p) => (
+              <s-stack direction="inline" gap="small-200">
+                {data.presets.map((p) => (
+                  <s-button
+                    key={p.name}
+                    disabled={boxes.length >= MAX_BOXES}
+                    onClick={() =>
+                      setBoxes((bs) => [
+                        ...bs,
+                        {
+                          lengthCm: p.lengthCm,
+                          widthCm: p.widthCm,
+                          heightCm: p.heightCm,
+                          weightKg: p.weightKg,
+                          presetName: p.name,
+                        },
+                      ])
+                    }
+                  >
+                    + {p.name}
+                  </s-button>
+                ))}
                 <s-button
-                  key={p.name}
+                  variant="tertiary"
+                  disabled={boxes.length >= MAX_BOXES}
                   onClick={() =>
-                    setBoxes((bs) =>
-                      bs.length >= MAX_BOXES
-                        ? bs
-                        : [...bs, { lengthCm: p.lengthCm, widthCm: p.widthCm, heightCm: p.heightCm, weightKg: p.weightKg, presetName: p.name }],
-                    )
+                    setBoxes((bs) => [...bs, { lengthCm: 0, widthCm: 0, heightCm: 0, weightKg: 0 }])
                   }
                 >
-                  + {p.name}
+                  + Custom
                 </s-button>
-              ))}
-              <s-button
-                variant="tertiary"
-                onClick={() => setBoxes((bs) => [...bs, { lengthCm: 0, widthCm: 0, heightCm: 0, weightKg: 0 }])}
-              >
-                + Custom
-              </s-button>
-            </s-stack>
+              </s-stack>
 
-            {tooManyForModal ? (
-              <s-banner tone="info">
-                {boxes.length} boxes — easier to edit in{" "}
-                <s-link href={fullScreen}>full screen</s-link>.
-              </s-banner>
-            ) : null}
+              {boxes.length > MODAL_BOX_LIMIT ? (
+                <s-banner tone="info">
+                  {boxes.length} boxes — easier to edit in{" "}
+                  <s-link href={fullScreen}>full screen</s-link>.
+                </s-banner>
+              ) : null}
 
-            {boxes.length > 0 ? (
+              {boxes.length > 0 ? (
+                <s-table>
+                  <s-table-header-row>
+                    <s-table-header>#</s-table-header>
+                    <s-table-header>L cm</s-table-header>
+                    <s-table-header>W cm</s-table-header>
+                    <s-table-header>H cm</s-table-header>
+                    <s-table-header>kg</s-table-header>
+                    <s-table-header>Remove</s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {boxes.map((b, i) => (
+                      <s-table-row key={i}>
+                        <s-table-cell>{i + 1}</s-table-cell>
+                        {(["lengthCm", "widthCm", "heightCm", "weightKg"] as const).map((f) => (
+                          <s-table-cell key={f}>
+                            <s-number-field
+                              label={f}
+                              labelAccessibilityVisibility="exclusive"
+                              value={b[f] ? String(b[f]) : ""}
+                              min={0}
+                              step={f === "weightKg" ? 0.1 : 1}
+                              onInput={(e: Event) => setField(i, f, inputValue(e))}
+                            />
+                          </s-table-cell>
+                        ))}
+                        <s-table-cell>
+                          <s-button
+                            variant="tertiary"
+                            tone="critical"
+                            accessibilityLabel={`Remove box ${i + 1}`}
+                            onClick={() => setBoxes((bs) => bs.filter((_, j) => j !== i))}
+                          >
+                            ✕
+                          </s-button>
+                        </s-table-cell>
+                      </s-table-row>
+                    ))}
+                  </s-table-body>
+                </s-table>
+              ) : (
+                <s-text color="subdued">No boxes yet — add a preset.</s-text>
+              )}
+
+              <s-stack direction="inline" gap="small-200" alignItems="center">
+                <s-number-field
+                  label="Copies of last box"
+                  labelAccessibilityVisibility="exclusive"
+                  value={dup}
+                  min={1}
+                  max={MAX_BOXES}
+                  step={1}
+                  onInput={(e: Event) => setDup(inputValue(e))}
+                />
+                <s-button onClick={duplicateLast} disabled={boxes.length === 0}>
+                  Duplicate last ×{dup || 1}
+                </s-button>
+                <s-text color="subdued">
+                  {boxes.length} box{boxes.length === 1 ? "" : "es"} · {totalKg.toFixed(1)} kg
+                </s-text>
+              </s-stack>
+
+              <s-checkbox
+                label="Signature required"
+                details="UPS: Adult Signature Required · Canada Post: Signature"
+                checked={signature}
+                onChange={(e: Event) => {
+                  const v = checkedValue(e);
+                  setSignature(v);
+                  if (quoted) void save("quote", { signature: v });
+                }}
+              />
+              <s-checkbox
+                label="Preview with sample prices"
+                checked={sample}
+                onChange={(e: Event) => {
+                  const v = checkedValue(e);
+                  setSample(v);
+                  if (quoted) void save("quote", { sample: v });
+                }}
+              />
+          </s-stack>
+        ) : null}
+
+        {/* ---- carrier rows */}
+        {route === "quotes" ? (
+          <s-stack gap="small-200">
+            {rows.map((row) => (
+              <s-box key={row.carrierId} padding="small" border="base" borderRadius="base">
+                <s-stack gap="small-100">
+                  <s-stack direction="inline" gap="small-200" alignItems="center">
+                    <s-text type="strong">{row.carrierName}</s-text>
+                    {row.usual ? <s-badge tone="info">Usual</s-badge> : null}
+                    {row.poBoxNote === "PO Box → CP" ? <s-badge>PO Box → CP</s-badge> : null}
+                  </s-stack>
+                  {row.status === "not-connected" ? (
+                    <s-text color="subdued">
+                      Not connected — needs {row.needs.join(", ")}.{" "}
+                      <s-link href="app:app/setup">Setup</s-link>
+                    </s-text>
+                  ) : null}
+                  {row.message ? <s-text color="subdued">{row.message}</s-text> : null}
+                  {row.quotes.map((qt) => {
+                    const tipId = `tip-${qt.id.replace(/[^a-z0-9]/gi, "-")}`;
+                    return (
+                      <s-stack key={qt.id} direction="inline" gap="small-200" alignItems="center">
+                        <s-text>
+                          {qt.serviceName}: ${qt.totalCad.toFixed(2)}
+                          {qt.transitDays ? ` · ${qt.transitDays} d` : ""}
+                        </s-text>
+                        {qt.sample ? <s-badge tone="warning">SAMPLE</s-badge> : null}
+                        <s-button disabled interestFor={tipId}>
+                          Print labels
+                        </s-button>
+                        <s-tooltip id={tipId}>
+                          {row.status === "connected"
+                            ? "Booking is off in this read-only build"
+                            : `Available once ${row.carrierName} is connected`}
+                        </s-tooltip>
+                        {row.fields && boxesValid ? (
+                          <s-link href={`${fullScreen}?preview=${row.carrierId}`}>
+                            Preview sample label
+                          </s-link>
+                        ) : null}
+                      </s-stack>
+                    );
+                  })}
+                </s-stack>
+              </s-box>
+            ))}
+
+            <s-button variant="tertiary" onClick={() => setShowFields((v) => !v)}>
+              {showFields ? "Hide" : "Show"} what each courier will receive
+            </s-button>
+            {showFields ? (
               <s-table>
                 <s-table-header-row>
-                  <s-table-header>#</s-table-header>
-                  <s-table-header>L cm</s-table-header>
-                  <s-table-header>W cm</s-table-header>
-                  <s-table-header>H cm</s-table-header>
-                  <s-table-header>kg</s-table-header>
-                  <s-table-header> </s-table-header>
+                  <s-table-header>Field</s-table-header>
+                  {rows.map((r) => (
+                    <s-table-header key={r.carrierId}>{r.carrierName}</s-table-header>
+                  ))}
                 </s-table-header-row>
                 <s-table-body>
-                  {boxes.map((b, i) => (
-                    <s-table-row key={i}>
-                      <s-table-cell>{i + 1}</s-table-cell>
-                      {(["lengthCm", "widthCm", "heightCm", "weightKg"] as const).map((f) => (
-                        <s-table-cell key={f}>
-                          <s-number-field
-                            label={f}
-                            labelAccessibilityVisibility="exclusive"
-                            value={b[f] ? String(b[f]) : ""}
-                            min={0}
-                            step={f === "weightKg" ? 0.1 : 1}
-                            onInput={(e: Event) => setField(i, f, inputValue(e))}
-                          />
+                  {FIELD_LABELS.map(([key, label]) => (
+                    <s-table-row key={key}>
+                      <s-table-cell>{label}</s-table-cell>
+                      {rows.map((r) => (
+                        <s-table-cell key={r.carrierId}>
+                          {r.fields ? show(r.fields[key]) : key === "name" ? r.message ?? "—" : "—"}
                         </s-table-cell>
                       ))}
-                      <s-table-cell>
-                        <s-button
-                          variant="tertiary"
-                          tone="critical"
-                          accessibilityLabel={`Remove box ${i + 1}`}
-                          onClick={() => setBoxes((bs) => bs.filter((_, j) => j !== i))}
-                        >
-                          ✕
-                        </s-button>
-                      </s-table-cell>
                     </s-table-row>
                   ))}
                 </s-table-body>
               </s-table>
             ) : null}
-
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-number-field
-                label="Copies of last box"
-                labelAccessibilityVisibility="exclusive"
-                value={dup}
-                min={1}
-                max={MAX_BOXES}
-                step={1}
-                onInput={(e: Event) => setDup(inputValue(e))}
-              />
-              <s-button onClick={duplicateLast} disabled={boxes.length === 0}>
-                Duplicate last ×{dup || 1}
-              </s-button>
-              <s-text color="subdued">
-                {boxes.length} box{boxes.length === 1 ? "" : "es"} · {totalKg.toFixed(1)} kg
-              </s-text>
-            </s-stack>
-
-            {quotes ? (
-              quotes.length === 0 ? (
-                <s-text>No quotes returned.</s-text>
-              ) : (
-                <s-stack gap="small-100">
-                  <s-text type="strong">Quotes (mock — no real carriers yet)</s-text>
-                  {quotes.map((qt) => (
-                    <s-stack key={qt.id} direction="inline" gap="small-200" alignItems="center">
-                      <s-text>
-                        {qt.carrierName} {qt.serviceName}: ${qt.totalCad.toFixed(2)}
-                        {qt.transitDays ? ` · ${qt.transitDays} d` : ""}
-                      </s-text>
-                      {data.history?.usual &&
-                      courierKey(qt.carrierName) === courierKey(data.history.usual.courier) ? (
-                        <s-badge tone="info">Usual</s-badge>
-                      ) : null}
-                    </s-stack>
-                  ))}
-                </s-stack>
-              )
-            ) : null}
           </s-stack>
-        )}
+        ) : null}
 
         {saved ? <s-banner tone="success">Shipment saved.</s-banner> : null}
         {errors.length > 0 ? (
@@ -464,11 +637,17 @@ function Extension() {
       </s-stack>
 
       {/* ---- footer actions */}
-      {viaOt && data.otUrl ? (
-        <s-button slot="primary-action" href={data.otUrl} target="_blank">
-          Print in OT
-        </s-button>
-      ) : addressType && !viaOt ? (
+      {route === "print-in-ot" ? (
+        data.otUrl ? (
+          <s-button slot="primary-action" href={data.otUrl} target="_blank">
+            Print in OT
+          </s-button>
+        ) : (
+          <s-button slot="primary-action" onClick={() => shopify.close()}>
+            Print in OT
+          </s-button>
+        )
+      ) : route === "quotes" ? (
         <s-button slot="primary-action" onClick={() => save("quote")} loading={busy}>
           Get quotes
         </s-button>
@@ -476,7 +655,7 @@ function Extension() {
       <s-button slot="secondary-actions" href={fullScreen}>
         Open full screen
       </s-button>
-      {addressType && !viaOt ? (
+      {route === "quotes" ? (
         <s-button slot="secondary-actions" onClick={() => save("save")}>
           Save
         </s-button>

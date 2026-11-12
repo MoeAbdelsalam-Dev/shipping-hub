@@ -1,5 +1,6 @@
 import db from "../../db.server";
 import type { ShipAddress } from "../../../carriers/types";
+import { missingEnv } from "../../../carriers/env";
 import { getJudge, type JudgeOutput } from "./judge.server";
 import { getSearchProvider, type SearchResult } from "./search.server";
 import { MAX_EVIDENCE, type Classification, type Evidence, type Verdict } from "./types";
@@ -14,6 +15,20 @@ import { MAX_EVIDENCE, type Classification, type Evidence, type Verdict } from "
  * Results are cached per (shop, normalized address). The classifier never sets
  * the shipment's address type — staff must click Confirm.
  */
+
+export const CLASSIFIER_ENV = ["BRAVE_SEARCH_API_KEY", "ANTHROPIC_API_KEY"];
+
+/** Env names still missing for the address check (empty = ready). */
+export function classifierNeeds(): string[] {
+  return process.env.CLASSIFIER_DEMO === "1" ? [] : missingEnv(CLASSIFIER_ENV);
+}
+
+export class ClassifierNotConnectedError extends Error {
+  constructor() {
+    super("Address check not connected");
+    this.name = "ClassifierNotConnectedError";
+  }
+}
 
 /** "Unit 1203, 55 Main St" style query, unit included. */
 export function addressQuery(a: ShipAddress): string {
@@ -65,7 +80,9 @@ export async function getCachedClassification(
   const row = await db.addressCheck.findUnique({
     where: { shop_addressKey: { shop, addressKey: addressKey(address) } },
   });
-  return row ? toClassification(row) : null;
+  // Old demo-data rows are not shown as real results.
+  if (!row || (row.source === "mock" && process.env.CLASSIFIER_DEMO !== "1")) return null;
+  return toClassification(row);
 }
 
 async function runClassifier(address: ShipAddress): Promise<{
@@ -75,6 +92,7 @@ async function runClassifier(address: ShipAddress): Promise<{
 }> {
   const search = getSearchProvider();
   const judge = getJudge();
+  if (!search || !judge) throw new ClassifierNotConnectedError();
 
   const results = (await search.search(addressQuery(address), 10)).slice(0, 10);
   let result = await judge.judge({

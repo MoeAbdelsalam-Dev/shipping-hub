@@ -1,0 +1,16 @@
+{
+  "_note": "Shipping rules. poBoxPatterns are case-insensitive regular expressions matched against address1 and address2. Unit-tested in app/lib/rules.test.ts - run `npm test` after editing.",
+  "poBoxPatterns": [
+    "\\bP\\.?\\s*O\\.?\\s*Box\\s*#?\\s*\\d+",
+    "\\bP\\.?\\s*O\\.?\\s*Box\\b",
+    "\\bPost\\s+Office\\s+Box\\s*#?\\s*\\d*",
+    "\\bPOB\\s*#?\\s*\\d+",
+    "\\bBox\\s*#?\\s*\\d+",
+    "\\bC\\.\\s*P\\.?\\s*#?\\s*\\d+",
+    "\\bCP\\s*#?\\s*\\d+",
+    "\\bCase\\s+postale\\s*#?\\s*\\d*",
+    "\\bGeneral\\s+Delivery\\b"
+  ],
+  "_routing": "GTA + residential orders skip quotes and go straight to this carrier's own label (one 'Print in OT' button).",
+  "gtaResidentialCarrier": "ot"
+}

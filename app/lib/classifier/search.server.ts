@@ -124,7 +124,9 @@ export const mockSearch: SearchProvider = {
   },
 };
 
-export function getSearchProvider(): SearchProvider {
+/** Live provider, or null when BRAVE_SEARCH_API_KEY is missing (no demo data by default). */
+export function getSearchProvider(): SearchProvider | null {
   const key = process.env.BRAVE_SEARCH_API_KEY?.trim();
-  return key ? braveSearch(key) : mockSearch;
+  if (key) return braveSearch(key);
+  return process.env.CLASSIFIER_DEMO === "1" ? mockSearch : null;
 }

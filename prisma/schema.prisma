@@ -42,6 +42,7 @@ model ShipmentDraft {
   orderName   String
   addressType String? // "residential" | "commercial" | null = not decided yet
   boxesJson   String   @default("[]") // Box[] from carriers/types.ts
+  signatureRequired Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -85,4 +86,16 @@ model Shipment {
 
   @@index([shop, orderId])
   @@index([shop, customerId])
+}
+
+// Small key/value store for setup state (manual checklist statuses,
+// confirmed ship-from location). App state only — never store secrets here.
+model Setting {
+  id        String   @id @default(cuid())
+  shop      String
+  key       String
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, key])
 }

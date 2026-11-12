@@ -1,21 +1,18 @@
-import { mockCarrier } from "./mock";
-import type {
-  AddressType,
-  Box,
-  CarrierAdapter,
-  Quote,
-  ShipOrder,
-} from "./types";
+import { canadaPostCarrier } from "./canadapost";
+import { missingEnv } from "./env";
+import { otCarrier } from "./ot";
+import type { CarrierAdapter } from "./types";
+import { upsCarrier } from "./ups";
 
 export * from "./types";
+export { missingEnv } from "./env";
 
 /**
- * Registered carriers. Today only the mock. Planned:
- *   ot.ts (Phase 2, page automation - stub exists, not registered yet),
- *   ups.ts / canadapost.ts / fedex.ts (Phase 3, official APIs).
- * Register an adapter only when its credentials/config are present.
+ * Every carrier we use, in display order. Each one reports "connected" only
+ * when all its env vars are set; app/lib/quotes.server.ts shows a row per
+ * carrier either way ("Not connected — needs …" otherwise).
  */
-export const carriers: CarrierAdapter[] = [mockCarrier];
+export const carriers: CarrierAdapter[] = [upsCarrier, canadaPostCarrier, otCarrier];
 
 export function getCarrier(id: string): CarrierAdapter {
   const c = carriers.find((x) => x.id === id);
@@ -28,30 +25,7 @@ export function carrierForQuote(quoteId: string): CarrierAdapter {
   return getCarrier(quoteId.split(":")[0]);
 }
 
-export interface QuoteAllResult {
-  quotes: Quote[];
-  errors: { carrierId: string; message: string }[];
-}
-
-/** Ask every carrier in parallel; one failing carrier never blocks the rest. */
-export async function quoteAll(
-  order: ShipOrder,
-  boxes: Box[],
-  addressType: AddressType,
-): Promise<QuoteAllResult> {
-  const results = await Promise.allSettled(
-    carriers.map((c) => c.getQuotes(order, boxes, addressType)),
-  );
-  const quotes: Quote[] = [];
-  const errors: QuoteAllResult["errors"] = [];
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") quotes.push(...r.value);
-    else
-      errors.push({
-        carrierId: carriers[i].id,
-        message: r.reason instanceof Error ? r.reason.message : String(r.reason),
-      });
-  });
-  quotes.sort((a, b) => a.totalCad - b.totalCad);
-  return { quotes, errors };
+/** Env var names still missing for a carrier (names only, never values). */
+export function carrierNeeds(id: string): string[] {
+  return missingEnv(getCarrier(id).requiredEnv);
 }

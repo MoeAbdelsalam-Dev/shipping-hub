@@ -11,6 +11,8 @@ interface Props {
   /** What staff have confirmed for this shipment (null = not yet). */
   confirmed: AddressType | null;
   phone: string | null;
+  /** Missing env names; non-empty = not connected. */
+  needs: string[];
   onCheck: () => void;
   onRecheck: () => void;
   onConfirm: (t: AddressType) => void;
@@ -26,11 +28,29 @@ export function AddressCheckPanel({
   error,
   confirmed,
   phone,
+  needs,
   onCheck,
   onRecheck,
   onConfirm,
 }: Props) {
   const loading = checking ? { loading: true } : {};
+
+  if (!c && needs.length > 0) {
+    return (
+      <s-stack gap="small-200">
+        <s-stack direction="inline" gap="small-200" alignItems="center">
+          <s-button icon="search" disabled interestFor="address-check-tip">
+            Check address automatically
+          </s-button>
+          <s-tooltip id="address-check-tip">Available once the address check is connected</s-tooltip>
+        </s-stack>
+        <s-text color="subdued">
+          Not connected — needs {needs.join(", ")}.{" "}
+          <s-link href="/app/setup">Setup — what we need</s-link>
+        </s-text>
+      </s-stack>
+    );
+  }
 
   if (!c) {
     return (
@@ -90,9 +110,11 @@ export function AddressCheckPanel({
               Confirm {LABEL[c.verdict]}
             </s-button>
           )}
-          <s-button variant="tertiary" onClick={onRecheck} {...loading}>
-            Check again
-          </s-button>
+          {needs.length === 0 ? (
+            <s-button variant="tertiary" onClick={onRecheck} {...loading}>
+              Check again
+            </s-button>
+          ) : null}
         </s-stack>
         {error ? <s-text tone="critical">{error}</s-text> : null}
       </s-stack>

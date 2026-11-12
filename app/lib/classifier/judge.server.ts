@@ -186,6 +186,8 @@ export const mockJudge: Judge = {
   },
 };
 
-export function getJudge(): Judge {
-  return process.env.ANTHROPIC_API_KEY?.trim() ? claudeJudge() : mockJudge;
+/** Claude, or null when ANTHROPIC_API_KEY is missing (no demo data by default). */
+export function getJudge(): Judge | null {
+  if (process.env.ANTHROPIC_API_KEY?.trim()) return claudeJudge();
+  return process.env.CLASSIFIER_DEMO === "1" ? mockJudge : null;
 }

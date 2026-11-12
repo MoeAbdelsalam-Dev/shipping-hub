@@ -1,0 +1,50 @@
+{
+  "_note": "What each courier receives. Field values are expressions: 'customer' (ship-to name), 'company', 'company||customer' (company, else customer), 'orderNumber', 'email', 'phone', or null (leave empty). poBox: 'allow' = send the full address incl. PO Box; 'strip' = remove the PO Box line and ship to the street address, or refuse if only a PO Box is left. signature: what the 'Signature required' checkbox maps to, null = not offered. requiredEnv: env vars that must be set for the carrier to count as connected.",
+  "carriers": {
+    "ups": {
+      "name": "UPS",
+      "fields": {
+        "name": "company||customer",
+        "attention": "customer",
+        "company": null,
+        "reference": null,
+        "phone": "phone",
+        "email": "email"
+      },
+      "poBox": "strip",
+      "signature": "Adult Signature Required",
+      "requiredEnv": ["UPS_CLIENT_ID", "UPS_CLIENT_SECRET", "UPS_ACCOUNT_NUMBER"],
+      "setupWhere": "UPS Developer Portal"
+    },
+    "canadapost": {
+      "name": "Canada Post",
+      "fields": {
+        "name": "customer",
+        "attention": null,
+        "company": "company",
+        "reference": "orderNumber",
+        "phone": "phone",
+        "email": "email"
+      },
+      "poBox": "allow",
+      "signature": "Signature",
+      "requiredEnv": ["CP_API_USERNAME", "CP_API_PASSWORD", "CP_CUSTOMER_NUMBER", "CP_CONTRACT_NUMBER"],
+      "setupWhere": "Canada Post Developer Program"
+    },
+    "ot": {
+      "name": "OT",
+      "fields": {
+        "name": "customer",
+        "attention": null,
+        "company": "company",
+        "reference": "orderNumber",
+        "phone": "phone",
+        "email": "email"
+      },
+      "poBox": "strip",
+      "signature": null,
+      "requiredEnv": ["OT_API_KEY"],
+      "setupWhere": "OT (API key, if OT has an API)"
+    }
+  }
+}

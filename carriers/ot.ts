@@ -1,7 +1,10 @@
+import { hasAllEnv, NotImplementedError } from "./env";
 import type { Booking, CarrierAdapter, Label, Quote } from "./types";
 
 /**
- * OT — local courier, NO API. STUB (Phase 2). Not registered in index.ts yet.
+ * OT — local courier. STUB (Phase 2). Counts as connected when OT_API_KEY is
+ * set (if OT turns out to have an API); otherwise the plan is page automation
+ * via a Chrome extension on the shipping PC (needs approval — see Setup page).
  *
  * How OT works today (manual):
  *   1. On the Shopify order page, staff click OT's order action button.
@@ -31,12 +34,16 @@ import type { Booking, CarrierAdapter, Label, Quote } from "./types";
  */
 
 function notYet(): never {
-  throw new Error("OT adapter not implemented yet (Phase 2)");
+  throw new NotImplementedError("OT quoting");
 }
+
+const REQUIRED = ["OT_API_KEY"];
 
 export const otCarrier: CarrierAdapter = {
   id: "ot",
   name: "OT",
+  requiredEnv: REQUIRED,
+  isConnected: () => hasAllEnv(REQUIRED),
 
   // Signature: getQuotes(order: ShipOrder, boxes: Box[], addressType: AddressType)
   async getQuotes(): Promise<Quote[]> {

@@ -1,8 +1,7 @@
-// Types for the `shopify` global and the admin web components (s-*) in this
-// extension target. `shopify app dev` generates an equivalent file.
-import "@shopify/ui-extensions/preact";
-import type { Api } from "@shopify/ui-extensions/admin.order-details.action.render";
+import '@shopify/ui-extensions';
 
-declare global {
-  const shopify: Api;
+//@ts-ignore
+declare module './src/ActionExtension.tsx' {
+  const shopify: import('@shopify/ui-extensions/admin.order-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
 }

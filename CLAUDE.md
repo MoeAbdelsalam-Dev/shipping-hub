@@ -14,11 +14,13 @@ boxes seen) → compare quotes → book → print labels.
 | Carrier | Integration | Phase |
 |---|---|---|
 | **OT** (local courier) | **No API.** Web page automation — see "OT adapter" | 2 |
-| UPS | Official API | 4 |
-| Canada Post | Official API | 4 |
-| FedEx | Official API | 4 |
+| UPS | Official API (`carriers/ups.ts` stub) | 4 |
+| Canada Post | Official API (`carriers/canadapost.ts` stub) | 4 |
+| FedEx | Official API — not in the presentation build | later |
 
-No other carriers. Don't add any without being asked.
+No other carriers. Don't add any without being asked. The quotes list always
+shows one row per carrier (UPS, Canada Post, OT): connected → real quotes;
+not connected → "Not connected — needs <ENV…>" + link to the Setup page.
 
 **Key business rule:** a *GTA + residential* order ships with **OT** and needs
 no dimensions and no weight. Staff open the order in OT and print **OT's**
@@ -45,18 +47,26 @@ quotes flow.
 
 The app is installed on the real store as a **read-only test build**:
 
-- Scopes: `read_orders,read_customers` only (`shopify.app.toml`,
-  `.env.example`). No write scopes. Do not add any until test mode ends.
+- Scopes: `read_orders,read_customers,read_locations` only
+  (`shopify.app.toml`, `.env.example`). No write scopes. Do not add any until
+  test mode ends.
 - No Shopify mutations anywhere in the code (the old GTA tag sync —
   `tagsAdd`/`tagsRemove`, needing `write_orders` — was removed).
-- No carrier or OT calls: only the mock carrier is registered (local maths,
-  no network); `carriers/ot.ts` is an unregistered stub; "Print in OT" is a
-  plain link staff click.
+- No carrier or OT calls: the UPS / Canada Post / OT adapters are stubs that
+  only read env vars to report "connected" and throw "not built yet" — no
+  network. "Preview with sample prices" quotes are generated locally
+  (`carriers/sample.ts`, labelled SAMPLE). "Print labels" is disabled;
+  "Preview sample label" draws a watermarked 4x6 page in the browser.
+  "Print in OT" is a plain link staff click.
+- No demo data by default: the address check shows "Not connected — needs
+  BRAVE_SEARCH_API_KEY, ANTHROPIC_API_KEY" until keys exist
+  (`CLASSIFIER_DEMO=1` turns the built-in demo back on for development only).
 - Yellow `TestModeBanner` on every page and in the order modal: "TEST MODE —
   read-only. Nothing is shipped, booked, or changed."
 - Our own database is still written (shipment drafts, address-check cache,
   staff confirmations) — that is app state, not store data.
-- Outgoing network calls: Shopify Admin GraphQL (queries only); Brave Search
+- Outgoing network calls: Shopify Admin GraphQL (queries only: orders,
+  order, customer order history, locations); Brave Search
   + Claude API only if their keys are set and only when staff click "Check
   address"; the order modal → our own `/api/ship/:id`. Google/Maps/evidence
   links open in the staff member's browser, not from our server.
@@ -69,9 +79,41 @@ shipping phone, line items, customer id.
 
 `ShipOrder` (carriers/types.ts) carries `orderNumber` and `email` to every
 adapter:
-- **orderNumber** goes in the carrier's **reference** field (Canada Post, OT,
-  UPS, FedEx) so labels/invoices match back to the Shopify order.
+- **orderNumber** goes in the carrier's **reference** field where the mapping
+  says so (Canada Post, OT — not UPS, see Rules).
 - **email** is passed to the carrier for its tracking notifications only.
+
+## Rules (config-driven, unit-tested — `npm test`)
+
+All in `app/lib/rules.ts`, config in `config/rules.json` and
+`config/carrier_fields.json`, tests in `app/lib/rules.test.ts`:
+
+- **GTA + residential** → skip quotes; one "Print in OT" button.
+- **PO Box** (PO Box, P.O. Box, POB, Box <n>, C.P. <n>, Case postale,
+  General Delivery — regexes in `config/rules.json`): Canada Post gets the full
+  address + "PO Box → CP" badge; UPS/OT get the address with the PO Box
+  stripped if a street address remains, otherwise the row says
+  "PO Box only — Canada Post only".
+- **Signature required** checkbox: UPS = Adult Signature Required,
+  Canada Post = Signature, OT = not offered (null in config).
+- **Field mapping** (`config/carrier_fields.json`): UPS name = company ||
+  customer, attention = customer, no reference; Canada Post name = customer,
+  company = company, reference = order number; OT like Canada Post. Email and
+  phone go to every carrier. The quotes section has a collapsible "What each
+  courier will receive" panel showing the mapped values.
+- **Courier history**: "Usually ships with X (n of N)" + "Usual" badge on that
+  carrier's row (never used for residential/commercial).
+
+## Setup page — "Setup — what we need" (`/app/setup`)
+
+Checklist with status pills (Done / Waiting / Not started / Later), who
+provides each item, why, and where it goes. Auto-detected: granted scopes,
+carrier env vars (names only — values are never displayed), Shopify Locations
+(ship-from; staff confirm one → stored in `Setting`), `config/boxes.json`
+(`_placeholder: true` = not started), address-check keys. Manual items (staff
+account, owner approval, OT) have Mark done / Mark waiting buttons stored in
+`Setting`. "Print this checklist" opens a clean printable page. Every env var
+is listed with comments in `.env.example`.
 
 ### Protected customer data (required for name/address/email/phone)
 
@@ -125,11 +167,14 @@ config/
   gta_fsa.json      GTA definition: "prefixes" (e.g. all of M) + "fsas" grouped by region
   boxes.json        Box presets (cm / kg) shown as one-click buttons
   ot.json           OT order-page URL template (TBD after recon)
+  rules.json        PO Box patterns, GTA-residential carrier
+  carrier_fields.json  Per-carrier field mapping, PO Box handling, signature, required env
 carriers/
   types.ts          CarrierAdapter interface + Box, Quote, Booking, Label, AddressType
-  index.ts          Registry: carriers[], getCarrier(), carrierForQuote(), quoteAll()
-  mock.ts           Fake carrier (only registered carrier today)
-  ot.ts             OT adapter STUB — not registered until Phase 2
+  index.ts          Registry: carriers[] (UPS, Canada Post, OT), getCarrier(), carrierForQuote(), carrierNeeds()
+  env.ts            missingEnv / hasAllEnv / NotImplementedError (names only, never values)
+  ups.ts, canadapost.ts, ot.ts   Adapter stubs: connected = env present; quoting not built
+  sample.ts         "Preview with sample prices" quotes (local, sample: true)
 extensions/
   ship-desk-action/ Order-page action (Preact + admin web components, own tsconfig)
 app/
@@ -141,6 +186,15 @@ app/
   lib/history.server.ts  Customer courier history (last 10 orders + our Shipment rows)
   lib/courier.ts         normalizeCourier, isUsualCourier, historySummary (browser-safe)
   components/TestModeBanner.tsx  Yellow read-only banner (every page)
+  components/CarrierQuotes.tsx   Carrier rows, quotes, Print/Preview, "What each courier will receive"
+  lib/rules.ts (+ rules.test.ts) Routing, PO Box, signature, field mapping
+  lib/quotes.server.ts   carrierRows / quoteRows (status, sample quotes, adapter calls)
+  lib/carrierRows.ts     CarrierRow type (browser-safe)
+  lib/sampleLabel.ts     4x6 sample labels, watermarked "SAMPLE — NOT A REAL LABEL"
+  lib/locations.server.ts  Ship-from from Shopify Locations
+  lib/settings.server.ts   Per-shop key/value (Setting table)
+  lib/setup.ts / setup.server.ts  Setup checklist + printable view
+  routes/app.setup.tsx   "Setup — what we need"
   lib/classifier/        Address classifier (search.server, judge.server, index.server, types)
   components/AddressCheckPanel.tsx  Verdict + evidence + Confirm (full page)
   routes/app._index.tsx  Orders to ship (list, GTA filter) — secondary entry point
@@ -148,7 +202,8 @@ app/
   routes/api.ship.$id.tsx  JSON API for the order-page extension
 prisma/schema.prisma  Session (Shopify), ShipmentDraft (per-order boxes/address type),
                       AddressCheck (classifier cache + last staff confirmation),
-                      Shipment (bookings made by the app; courier history source)
+                      Shipment (bookings made by the app; courier history source),
+                      Setting (setup checklist state, confirmed ship-from location)
 ```
 
 ## Data flow (shipment screen)
@@ -160,8 +215,10 @@ prisma/schema.prisma  Session (Shopify), ShipmentDraft (per-order boxes/address 
    The Google / Maps buttons stay for manual checks. Nothing is decided or
    booked without a staff click.
 3. GTA + Residential → "Open in OT to print labels". Nothing else to enter.
-4. Otherwise → box table (presets, custom, Duplicate ×N, remove) → "Get quotes".
-   The action upserts the draft, validates, then calls `quoteAll()`.
+4. Otherwise → box table (presets, custom, Duplicate ×N, remove), Signature
+   required, Preview with sample prices → "Get quotes" (or Enter in a box
+   field on the full page). The action upserts the draft, validates, then
+   builds one row per carrier with `quoteRows()`.
 
 ## Carrier adapter contract
 
@@ -179,7 +236,7 @@ interface CarrierAdapter {
 - `Quote.id` MUST start with `"<carrierId>:"` — that's how `book()` is routed.
 - Adapter layer is metric (cm, kg) and CAD. Convert inside the adapter.
 - One box = one piece = one tracking number = one label, same order as `boxes`.
-- An adapter that throws must not break the others (`quoteAll` uses allSettled).
+- An adapter that throws must not break the others (`quoteRows` turns it into an "error" row).
 - Never log full payloads with customer addresses or credentials.
 
 ## OT adapter (plan — not built)
@@ -231,13 +288,16 @@ Mirrors the manual process (`app/lib/classifier/`):
    normalized address (+ the last staff confirmation). "Check again" bypasses
    the cache.
 
-Without keys the mock search + mock judge return "Demo data" results: an
-address with Unit/#/Apt → residential, Suite or Plaza/Industrial/Blvd →
-commercial (via the second search), anything else → unsure.
+Without keys the address check is "Not connected". For development only,
+`CLASSIFIER_DEMO=1` enables the built-in mock search + mock judge ("Demo
+data"): Unit/#/Apt → residential, Suite or Plaza/Industrial/Blvd → commercial
+(via the second search), anything else → unsure.
 
 ## Phases
 
-1. **Foundation (done, read-only test build)** — unfulfilled order list,
+1. **Foundation (done, read-only presentation build)** — setup checklist,
+   carrier rows with "Not connected — needs …", sample quotes + sample labels,
+   PO Box / signature / field-mapping rules, unfulfilled order list,
    GTA/Non-GTA zoning from FSA list, order data incl. email + courier history,
    shipment screen with boxes, presets, Duplicate ×N,
    Residential/Commercial, "Open in OT" step for GTA residential, carrier
@@ -280,5 +340,5 @@ commercial (via the second search), anything else → unsure.
 ## Commands
 
 - `npm run dev` — `shopify app dev` (tunnel + install on dev store)
-- `npm run typecheck` (app + extension), `npm run lint`, `npm run build`
+- `npm run typecheck` (app + extension), `npm run lint`, `npm test` (rules), `npm run build`
 - `npm run deploy` — push `shopify.app.toml` (scopes, URLs, webhooks) to Shopify

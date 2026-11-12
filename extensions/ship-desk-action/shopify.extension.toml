@@ -5,6 +5,7 @@ api_version = "2026-10"
 [[extensions]]
 name = "Ship with Ship Desk"
 handle = "ship-desk-action"
+uid = "9f140b58-c2c7-6880-6d55-3256200f5e6a87817d2f"
 type = "ui_extension"
 
 [[extensions.targeting]]
