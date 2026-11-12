@@ -1,0 +1,39 @@
+/* Package entry (app/components/PackageEntry.tsx) — used on /desk and /app/ship. */
+.pk { display: flex; flex-direction: column; gap: 10px; font-size: 14px; color: #1a1a1a; }
+.pk-muted { color: #616161; font-size: 13px; }
+.pk-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pk-chip { border: 1px solid #c9cccf; background: #fff; border-radius: 999px; padding: 4px 10px;
+  font: inherit; font-size: 13px; cursor: pointer; }
+.pk-chip:hover { background: #f1f2f4; }
+
+.pk-quick { display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap; }
+.pk-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #616161; }
+.pk-field input { width: 64px; padding: 7px 8px; border: 1px solid #8a8a8a; border-radius: 8px;
+  font: inherit; font-size: 15px; color: #1a1a1a; background: #fff; }
+.pk-field.pk-qty input { width: 52px; }
+.pk-field.pk-kg input { width: 76px; }
+.pk-field input:focus { outline: 2px solid #005bd3; outline-offset: 0; border-color: #005bd3; }
+.pk-add { padding: 8px 16px; border-radius: 8px; border: 0; background: #303030; color: #fff;
+  font: inherit; font-weight: 600; cursor: pointer; }
+.pk-add:disabled { opacity: .45; cursor: not-allowed; }
+.pk-hint { margin-top: -4px; }
+.pk-notice { color: #8a6116; font-size: 13px; }
+.pk-empty { color: #616161; padding: 10px 0; }
+
+.pk-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pk-line { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid #e3e3e3;
+  border-radius: 8px; background: #fff; flex-wrap: wrap; }
+.pk-line.pk-bad { border-color: #e51c00; background: #fff4f2; }
+.pk-range { min-width: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pk-summary { font-variant-numeric: tabular-nums; white-space: pre; }
+.pk-missing { color: #b81d00; font-weight: 600; font-size: 13px; }
+.pk-actions { margin-left: auto; display: flex; gap: 4px; }
+.pk-edit { display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap; }
+.pk-btn { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px;
+  border: 1px solid #c9cccf; background: #fff; cursor: pointer; }
+.pk-link { border-color: transparent; background: transparent; color: #005bd3; }
+.pk-link:hover { text-decoration: underline; }
+.pk-danger { color: #b81d00; }
+.pk-totals { font-size: 15px; }
+.pk-errors { margin: 0; padding: 10px 12px 10px 28px; border-radius: 8px; background: #fff4f2;
+  border: 1px solid #e51c00; color: #8e1f0b; font-size: 13px; }

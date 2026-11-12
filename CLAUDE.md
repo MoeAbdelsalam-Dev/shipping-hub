@@ -146,26 +146,66 @@ customer's usual courier with a "Usual" badge.
 - We do **not** request `read_all_orders`, so Shopify only returns roughly the
   last **60 days** of orders; older history is invisible.
 
-## Entry point
+## Entry points — standalone Ship Desk page
 
-Staff start from the **Shopify order page → More actions → "Ship with Ship
-Desk"** — an admin action extension (`extensions/ship-desk-action`, target
-`admin.order-details.action.render`), the same way OT's own action works. The
-modal shows ship-to, GTA/Non-GTA, the address check + Residential/Commercial,
-then either "Print in OT" (GTA + residential) or box entry + Get quotes. For
-big multi-piece orders it offers "Open full screen" → `/app/ship/:id`. The
-"Orders to ship" list page is secondary. Phase 5 adds an orders-index selection
-action for bulk shipping.
+Staff work on a **standalone page in a new browser tab** (like OT's order
+button), not inside Shopify admin:
 
-The modal talks to `/api/ship/:id` (JSON; `authenticate.admin` + `cors`), which
-runs the same code as the full page (`app/lib/shipping.server.ts`).
+    <SHOPIFY_APP_URL>/desk/<orderId>?shop=<shop>.myshopify.com&exp=<unix seconds>&sig=<hex>
+
+- `sig = HMAC-SHA256(SHOPIFY_API_SECRET, "<shop>|<orderId>|<exp>")`, 30-minute
+  expiry (`app/lib/deskLink.server.ts`, tests in `deskLink.test.ts`). Invalid or
+  expired → "Link expired — reopen from Shopify". Only the order id and shop
+  domain are in the URL — never customer data. The page sends
+  `Referrer-Policy: no-referrer` so the signed URL never leaks to Google/Maps.
+- Admin API calls on `/desk` use the shop's **offline session**
+  (`unauthenticated.admin(shop)`); every POST re-checks the signature (sent as
+  form fields). Same read-only rules as everywhere else.
+- **Order page → More actions → "Ship with Ship Desk"** (admin action
+  extension, `admin.order-details.action.render`): short summary + one big
+  "Open Ship Desk" button (target _blank). The link comes from
+  `/api/desk-link/:id`. The old box form is gone from the modal.
+- **Orders to ship** list: each "Ship" button opens `/desk` in a new tab
+  (signed link built in the loader). The order name still opens
+  `/app/ship/:id`, which stays as the embedded fallback.
+- Phase 5 adds an orders-index selection action for bulk shipping.
+
+`/desk/:orderId`, `/app/ship/:id` and `/api/ship/:id` all run
+`app/lib/shipping.server.ts` (loadShipment / handleShipment).
+
+Desk layout (1280px+): header (logo, order #, customer/company, city, GTA and
+PO Box badges, Residential/Commercial, Signature required, Preview with sample
+prices, Back to Shopify order); left column = packages + big Get quotes; right =
+BEST PRICE bar (cheapest + fastest) and three courier columns UPS | Canada Post
+| OT (status pill, services with days + price, ★ cheapest overall, Usual,
+Print labels disabled until connected, Preview sample label, "Needs <keys>" +
+Setup link); GTA + residential replaces the columns with a big "Print in OT"
+panel; bottom = "What each courier receives". Plain CSS (`app/styles/desk.css`),
+no App Bridge.
+
+## Package entry (staff always type it — never auto-filled)
+
+`app/components/PackageEntry.tsx` + `app/lib/packages.ts` (tests in
+`packages.test.ts`), the same on `/desk/:orderId` and `/app/ship/:id`:
+
+- Quick-entry row: Qty, L, W, H (cm), Weight (kg), Add. Enter adds and focus
+  returns to Qty; Enter on an empty row = Get quotes. Qty creates N identical
+  packages shown as one line ("1–6  45×35×30  6.0 kg each") with Edit / Delete.
+- Presets (`config/boxes.json`) fill L/W/H only. Weight is never prefilled —
+  not from presets, not from product data.
+- Before Get quotes every package needs L, W, H and weight > 0; the error says
+  which line is missing what ("Line 2 (packages 7–8): missing W, weight"). The
+  server runs the same check.
+- Totals: package count + total kg. Max 99 packages.
+- Carriers still receive one Box per package (`expandGroups`); saved drafts are
+  grouped back into lines (`groupBoxes`).
 
 ## Layout
 
 ```
 config/
   gta_fsa.json      GTA definition: "prefixes" (e.g. all of M) + "fsas" grouped by region
-  boxes.json        Box presets (cm / kg) shown as one-click buttons
+  boxes.json        Box presets (L×W×H cm only — weight is always typed)
   ot.json           OT order-page URL template (TBD after recon)
   rules.json        PO Box patterns, GTA-residential carrier
   carrier_fields.json  Per-carrier field mapping, PO Box handling, signature, required env
@@ -199,7 +239,13 @@ app/
   components/AddressCheckPanel.tsx  Verdict + evidence + Confirm (full page)
   routes/app._index.tsx  Orders to ship (list, GTA filter) — secondary entry point
   routes/app.ship.$id.tsx  Shipment screen for one order (id = numeric order id)
-  routes/api.ship.$id.tsx  JSON API for the order-page extension
+  routes/api.ship.$id.tsx  JSON API for the order-page extension (summary)
+  routes/api.desk-link.$id.tsx  Signed /desk link for the order-page extension
+  routes/desk.$orderId.tsx Standalone Ship Desk page (signed link, offline session)
+  lib/deskLink.server.ts   Sign / verify desk links (+ deskLink.test.ts)
+  lib/packages.ts          Package lines: expand/group, validation, totals (+ packages.test.ts)
+  components/PackageEntry.tsx  Quick-entry package editor (desk + /app/ship)
+  styles/desk.css, styles/packages.css  Plain CSS for the desk page / package entry
 prisma/schema.prisma  Session (Shopify), ShipmentDraft (per-order boxes/address type),
                       AddressCheck (classifier cache + last staff confirmation),
                       Shipment (bookings made by the app; courier history source),
@@ -215,7 +261,7 @@ prisma/schema.prisma  Session (Shopify), ShipmentDraft (per-order boxes/address 
    The Google / Maps buttons stay for manual checks. Nothing is decided or
    booked without a staff click.
 3. GTA + Residential → "Open in OT to print labels". Nothing else to enter.
-4. Otherwise → box table (presets, custom, Duplicate ×N, remove), Signature
+4. Otherwise → package entry (Qty lines, presets fill L/W/H, weight typed), Signature
    required, Preview with sample prices → "Get quotes" (or Enter in a box
    field on the full page). The action upserts the draft, validates, then
    builds one row per carrier with `quoteRows()`.
@@ -299,7 +345,7 @@ data"): Unit/#/Apt → residential, Suite or Plaza/Industrial/Blvd → commercia
    carrier rows with "Not connected — needs …", sample quotes + sample labels,
    PO Box / signature / field-mapping rules, unfulfilled order list,
    GTA/Non-GTA zoning from FSA list, order data incl. email + courier history,
-   shipment screen with boxes, presets, Duplicate ×N,
+   shipment screen with package lines (Qty), presets, standalone /desk page,
    Residential/Commercial, "Open in OT" step for GTA residential, carrier
    interface + mock quotes, saved drafts, **order-page action entry point**.
 2. **OT automation** — recon, choose Playwright vs Chrome extension, implement

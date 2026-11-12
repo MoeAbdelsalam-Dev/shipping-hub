@@ -1,0 +1,105 @@
+/* Standalone Ship Desk page (/desk/:orderId). Plain CSS, no admin chrome. */
+:root { color-scheme: light; }
+body { margin: 0; background: #eceef0; font-family: Inter, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #111; font-size: 14px; }
+a { color: #005bd3; }
+h1, h2, h3 { margin: 0; }
+
+.desk { min-height: 100vh; }
+.desk-test { background: #ffd23f; color: #3d2e00; text-align: center; font-weight: 700; padding: 6px 12px; }
+
+.desk-header { background: #fff; border-bottom: 1px solid #d4d6d9; padding: 12px 24px; display: flex;
+  flex-direction: column; gap: 10px; }
+.desk-header-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.desk-logo { font-weight: 800; font-size: 18px; letter-spacing: -.3px; background: #111; color: #fff;
+  padding: 4px 10px; border-radius: 6px; }
+.desk-order { font-size: 22px; font-weight: 800; }
+.desk-who { font-size: 16px; }
+.desk-sub { color: #5c5f62; }
+.desk-right { margin-left: auto; }
+.desk-back { margin-left: auto; font-weight: 600; text-decoration: none; padding: 6px 12px; border: 1px solid #c9cccf;
+  border-radius: 8px; color: #111; background: #fff; }
+.desk-back:hover { background: #f4f5f6; }
+.desk-info { font-size: 13px; gap: 14px; }
+.desk-warn { color: #8e1f0b; font-weight: 600; }
+.desk-ok { color: #0c5132; font-weight: 600; }
+
+.desk-badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  margin-left: 4px; }
+.desk-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  margin-left: auto; }
+.is-green { background: #cdfee1; color: #0c5132; }
+.is-blue { background: #e0f0ff; color: #00346b; }
+.is-amber { background: #ffef9d; color: #4f4700; }
+.is-red { background: #fedad9; color: #8e1f0b; }
+.is-grey { background: #e3e3e3; color: #303030; }
+
+.desk-seg { display: inline-flex; border: 1px solid #8a8a8a; border-radius: 9px; overflow: hidden; }
+.desk-seg button { font: inherit; font-weight: 600; padding: 8px 16px; border: 0; background: #fff; cursor: pointer; }
+.desk-seg button + button { border-left: 1px solid #8a8a8a; }
+.desk-seg button.is-on { background: #111; color: #fff; }
+.desk-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.desk-check input { width: 18px; height: 18px; }
+.desk-toggle { padding: 4px 10px; border: 1px dashed #b98900; border-radius: 8px; background: #fff8db; }
+
+.desk-btn { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid #c9cccf; background: #fff; cursor: pointer; }
+.desk-btn:disabled { color: #8a8a8a; background: #f1f2f4; cursor: not-allowed; }
+.desk-link { border-color: transparent; background: transparent; color: #005bd3; }
+
+.desk-main { display: grid; grid-template-columns: 440px minmax(0, 1fr); gap: 20px; padding: 20px 24px;
+  align-items: start; }
+.desk-main.is-single { grid-template-columns: 1fr; }
+.desk-card { background: #fff; border: 1px solid #d4d6d9; border-radius: 12px; padding: 16px; }
+.desk-left { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 12px; }
+.desk-left h2 { font-size: 16px; }
+.desk-quote { font: inherit; font-size: 18px; font-weight: 800; padding: 14px; border-radius: 10px; border: 0;
+  background: #008060; color: #fff; cursor: pointer; }
+.desk-quote:hover { background: #006e52; }
+.desk-quote:disabled { background: #9fb8ae; cursor: not-allowed; }
+
+.desk-right { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.desk-best { display: flex; flex-direction: column; gap: 4px; background: #111; color: #fff; border-radius: 12px;
+  padding: 14px 18px; font-size: 16px; }
+.desk-best .desk-sub { color: #c7c9cc; font-size: 14px; }
+.desk-best-title { font-size: 12px; letter-spacing: 2px; font-weight: 800; color: #ffd23f; }
+.desk-best .desk-price { font-size: 24px; }
+
+.desk-couriers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.desk-courier { background: #fff; border: 1px solid #d4d6d9; border-radius: 12px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px; }
+.desk-courier-head { display: flex; align-items: center; gap: 6px; }
+.desk-courier-head h3 { font-size: 18px; }
+.desk-needs { background: #f4f5f6; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.desk-empty { padding: 6px 0; }
+.desk-service { border: 1px solid #e3e3e3; border-radius: 10px; padding: 10px; display: flex; flex-direction: column;
+  gap: 6px; }
+.desk-service.is-cheapest { border: 2px solid #008060; background: #f1fdf7; }
+.desk-service-top { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.desk-service-mid { display: flex; align-items: baseline; justify-content: space-between; }
+.desk-price { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.desk-service-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.desk-ot { background: #fff; border: 2px solid #008060; border-radius: 14px; padding: 32px; text-align: center;
+  display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.desk-ot h2 { font-size: 26px; }
+.desk-big { display: inline-block; font-size: 22px; font-weight: 800; padding: 16px 40px; border-radius: 12px;
+  background: #008060; color: #fff; text-decoration: none; }
+.desk-big:hover { background: #006e52; }
+
+.desk-fields { margin: 0 24px 24px; display: flex; flex-direction: column; gap: 10px; }
+.desk-fields-toggle { font: inherit; font-weight: 700; font-size: 15px; border: 0; background: transparent;
+  text-align: left; cursor: pointer; padding: 0; }
+.desk-fields table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.desk-fields th, .desk-fields td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e3e3e3; }
+.desk-fields th { background: #f4f5f6; }
+
+.desk-message { max-width: 520px; margin: 12vh auto; background: #fff; border-radius: 14px; padding: 32px;
+  border: 1px solid #d4d6d9; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.desk-message h1 { font-size: 22px; }
+
+@media (max-width: 1100px) {
+  .desk-main { grid-template-columns: 1fr; }
+  .desk-left { position: static; }
+  .desk-couriers { grid-template-columns: 1fr; }
+}

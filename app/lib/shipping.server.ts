@@ -1,6 +1,6 @@
 import db from "../db.server";
 import type { AddressType, Box } from "../../carriers";
-import { boxPresets, isValidBox, parseBoxes } from "./boxes";
+import { boxPresets, parseBoxes } from "./boxes";
 import type { CarrierRow } from "./carrierRows";
 import {
   ClassifierNotConnectedError,
@@ -15,6 +15,7 @@ import { getCourierHistory } from "./history.server";
 import { getShipFrom } from "./locations.server";
 import { getOrder, orderNumericId, type AdminGraphql } from "./orders.server";
 import { otOrderUrl } from "./ot";
+import { groupBoxes, validatePackages } from "./packages";
 import { carrierRows, quoteRows } from "./quotes.server";
 import { detectPoBox, shipRoute } from "./rules";
 
@@ -213,11 +214,8 @@ export async function handleShipment(
   if (req.addressType && shipRoute(order.zone, req.addressType) === "print-in-ot") {
     problems.push("GTA residential ships with OT — use Print in OT, no quotes needed.");
   }
-  if (boxes.length === 0) problems.push("Add at least one box.");
-  boxes.forEach((b, i) => {
-    if (!isValidBox(b))
-      problems.push(`Box ${i + 1}: every dimension and the weight must be > 0.`);
-  });
+  // Same rules and wording as the package entry on both pages.
+  problems.push(...validatePackages(groupBoxes(boxes)));
   if (problems.length || !req.addressType) {
     return { ...base, saved: true, rows: carrierRows(order, opts), errors: problems };
   }

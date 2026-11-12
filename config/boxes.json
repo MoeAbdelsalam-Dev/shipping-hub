@@ -1,34 +1,30 @@
 {
-  "_note": "Box presets shown as one-click buttons (up to 5 - your most-used cartons). Dimensions in cm, weight in kg (starting value; staff can overwrite per box). Set _placeholder to false once these are your real boxes - the Setup page checks it.",
+  "_note": "Box presets shown as one-click buttons (up to 5 - your most-used cartons). Dimensions in cm. Presets fill L/W/H only: staff always type the weight (never prefilled). Set _placeholder to false once these are your real boxes - the Setup page checks it.",
   "_placeholder": true,
   "presets": [
     {
       "name": "Small",
       "lengthCm": 30,
       "widthCm": 25,
-      "heightCm": 20,
-      "weightKg": 2
+      "heightCm": 20
     },
     {
       "name": "Medium",
       "lengthCm": 45,
       "widthCm": 35,
-      "heightCm": 30,
-      "weightKg": 6
+      "heightCm": 30
     },
     {
       "name": "Large",
       "lengthCm": 60,
       "widthCm": 45,
-      "heightCm": 45,
-      "weightKg": 12
+      "heightCm": 45
     },
     {
       "name": "Long",
       "lengthCm": 120,
       "widthCm": 30,
-      "heightCm": 30,
-      "weightKg": 15
+      "heightCm": 30
     }
   ]
 }

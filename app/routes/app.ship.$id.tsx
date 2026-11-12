@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
+  LinksFunction,
   LoaderFunctionArgs,
 } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
@@ -12,18 +13,28 @@ import { authenticate } from "../shopify.server";
 import { AddressCheckPanel } from "../components/AddressCheckPanel";
 import { CarrierQuotes, CourierFieldsPanel } from "../components/CarrierQuotes";
 import { TestModeBanner } from "../components/TestModeBanner";
-import { MAX_BOXES, isValidBox, type BoxPreset } from "../lib/boxes";
+import { PackageEntry } from "../components/PackageEntry";
 import type { CarrierRow } from "../lib/carrierRows";
 import type { Classification } from "../lib/classifier/types";
 import { historySummary } from "../lib/courier";
 import { shipRoute } from "../lib/rules";
+import {
+  expandGroups,
+  groupBoxes,
+  packageCount,
+  validatePackages,
+  type PackageGroup,
+} from "../lib/packages";
 import { openSampleLabels } from "../lib/sampleLabel";
 import {
   handleShipment,
   loadShipment,
   parseShipRequest,
 } from "../lib/shipping.server";
-import type { AddressType, Box, Quote } from "../../carriers";
+import type { AddressType, Quote } from "../../carriers";
+import packagesCss from "../styles/packages.css?url";
+
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: packagesCss }];
 
 // ---------------------------------------------------------------- server
 
@@ -39,28 +50,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 // ---------------------------------------------------------------- client
-
-interface Row extends Box {
-  key: number;
-}
-
-let nextKey = 1;
-const toRow = (b: Box): Row => ({ ...b, key: nextKey++ });
-const fromPreset = (p: BoxPreset): Row =>
-  toRow({
-    lengthCm: p.lengthCm,
-    widthCm: p.widthCm,
-    heightCm: p.heightCm,
-    weightKg: p.weightKg,
-    presetName: p.name,
-  });
-const plainBox = (r: Row): Box => ({
-  lengthCm: r.lengthCm,
-  widthCm: r.widthCm,
-  heightCm: r.heightCm,
-  weightKg: r.weightKg,
-  presetName: r.presetName,
-});
 
 /**
  * React 18 does not wire onChange on custom elements, so listen for the
@@ -108,8 +97,8 @@ export default function ShipOrder() {
   const [addressType, setAddressType] = useState<AddressType | null>(
     draft?.addressType ?? null,
   );
-  const [boxes, setBoxes] = useState<Row[]>(() => (draft?.boxes ?? []).map(toRow));
-  const [dupCount, setDupCount] = useState<Record<number, string>>({});
+  const [groups, setGroups] = useState<PackageGroup[]>(() => groupBoxes(draft?.boxes ?? []));
+  const [pkgErrors, setPkgErrors] = useState<string[]>([]);
   const [signature, setSignature] = useState<boolean>(draft?.signatureRequired ?? false);
   const [sample, setSample] = useState(false);
 
@@ -135,32 +124,16 @@ export default function ShipOrder() {
     }
   }, [fetcher.state, fetcher.data, shopify]);
 
-  // --- box helpers
-  const room = MAX_BOXES - boxes.length;
-  const addRow = (r: Row) => room > 0 && setBoxes((rs) => [...rs, r]);
-  const updateRow = (key: number, field: keyof Box, value: string) =>
-    setBoxes((rs) =>
-      rs.map((r) =>
-        r.key === key ? { ...r, [field]: Number(value) || 0, presetName: undefined } : r,
-      ),
-    );
-  const removeRow = (key: number) => setBoxes((rs) => rs.filter((r) => r.key !== key));
-  const duplicateRow = (key: number) => {
-    const n = Math.max(1, Math.floor(Number(dupCount[key] || "1")));
-    setBoxes((rs) => {
-      const i = rs.findIndex((r) => r.key === key);
-      if (i < 0) return rs;
-      const copies = Array.from({ length: Math.min(n, MAX_BOXES - rs.length) }, () =>
-        toRow(rs[i]),
-      );
-      return [...rs.slice(0, i + 1), ...copies, ...rs.slice(i + 1)];
-    });
-  };
-  const totalKg = boxes.reduce((s, r) => s + (r.weightKg || 0), 0);
-  const boxesValid = boxes.length > 0 && boxes.every(isValidBox);
+  const boxesValid = groups.length > 0 && validatePackages(groups).length === 0;
 
   const submit = useCallback(
     (intent: "save" | "quote", over: { sample?: boolean; signature?: boolean } = {}) => {
+      if (intent === "quote") {
+        // Every package needs L, W, H and weight before quoting.
+        const errs = validatePackages(groups);
+        setPkgErrors(errs);
+        if (errs.length) return;
+      }
       lastIntent.current = intent;
       fetcher.submit(
         {
@@ -168,12 +141,12 @@ export default function ShipOrder() {
           addressType: addressType ?? "",
           signatureRequired: String(over.signature ?? signature),
           sample: String(over.sample ?? sample),
-          boxes: JSON.stringify(boxes.map(plainBox)),
+          boxes: JSON.stringify(expandGroups(groups)),
         },
         { method: "POST" },
       );
     },
-    [fetcher, addressType, signature, sample, boxes],
+    [fetcher, addressType, signature, sample, groups],
   );
 
   const runCheck = (intent: "classify" | "reclassify") =>
@@ -202,7 +175,7 @@ export default function ShipOrder() {
       orderName: order.name,
       fields: row.fields,
       shipFrom,
-      boxes: boxes.map(plainBox),
+      boxes: expandGroups(groups),
     });
     if (!ok) shopify.toast.show("Allow pop-ups to preview labels", { isError: true });
   };
@@ -229,12 +202,12 @@ export default function ShipOrder() {
                 icon="print"
                 onClick={() => previewLabels(previewRow, { serviceName: "Sample service" })}
               >
-                Open sample labels ({boxes.length})
+                Open sample labels ({packageCount(groups)})
               </s-button>
             ) : (
               <s-text color="subdued">
                 {previewRow.fields
-                  ? "Add boxes with dimensions and weight first."
+                  ? "Add packages with dimensions and weight first."
                   : previewRow.message}
               </s-text>
             )}
@@ -373,129 +346,18 @@ export default function ShipOrder() {
       {/* ---------------- Boxes + quotes */}
       {route === "quotes" ? (
         <>
-          <s-section heading={`Boxes (${boxes.length})`}>
-            {/* Enter in any box field = Get quotes */}
-            <div
-              role="presentation"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submit("quote");
-                }
-              }}
-            >
-              <s-stack gap="base">
-                <s-stack direction="inline" gap="small-200">
-                  {presets.map((p) => (
-                    <s-button
-                      key={p.name}
-                      onClick={() => addRow(fromPreset(p))}
-                      {...(room <= 0 ? { disabled: true } : {})}
-                    >
-                      + {p.name} ({p.lengthCm}×{p.widthCm}×{p.heightCm})
-                    </s-button>
-                  ))}
-                  <s-button
-                    variant="tertiary"
-                    onClick={() =>
-                      addRow(toRow({ lengthCm: 0, widthCm: 0, heightCm: 0, weightKg: 0 }))
-                    }
-                    {...(room <= 0 ? { disabled: true } : {})}
-                  >
-                    + Custom box
-                  </s-button>
-                  {boxes.length > 0 ? (
-                    <s-button variant="tertiary" tone="critical" onClick={() => setBoxes([])}>
-                      Clear all
-                    </s-button>
-                  ) : null}
-                </s-stack>
-
-                {boxes.length === 0 ? (
-                  <s-paragraph>
-                    No boxes yet. Add a preset, then use “Duplicate ×N” for multi-piece orders.
-                  </s-paragraph>
-                ) : (
-                  <s-table>
-                    <s-table-header-row>
-                      <s-table-header>#</s-table-header>
-                      <s-table-header>L (cm)</s-table-header>
-                      <s-table-header>W (cm)</s-table-header>
-                      <s-table-header>H (cm)</s-table-header>
-                      <s-table-header>Weight (kg)</s-table-header>
-                      <s-table-header>Duplicate</s-table-header>
-                      <s-table-header>Remove</s-table-header>
-                    </s-table-header-row>
-                    <s-table-body>
-                      {boxes.map((r, i) => (
-                        <s-table-row key={r.key}>
-                          <s-table-cell>
-                            {i + 1}
-                            {r.presetName ? ` · ${r.presetName}` : ""}
-                          </s-table-cell>
-                          {(["lengthCm", "widthCm", "heightCm", "weightKg"] as const).map((f) => (
-                            <s-table-cell key={f}>
-                              {/* Narrow inputs so the table fits ~1280px without scrolling */}
-                              <s-box inlineSize="84px">
-                                <s-number-field
-                                  label={f}
-                                  labelAccessibilityVisibility="exclusive"
-                                  value={r[f] ? String(r[f]) : ""}
-                                  min={0}
-                                  step={f === "weightKg" ? 0.1 : 1}
-                                  onInput={(e) => updateRow(r.key, f, e.currentTarget.value)}
-                                />
-                              </s-box>
-                            </s-table-cell>
-                          ))}
-                          <s-table-cell>
-                            <s-stack direction="inline" gap="small-100" alignItems="center">
-                              <s-box inlineSize="72px">
-                              <s-number-field
-                                label="Copies"
-                                labelAccessibilityVisibility="exclusive"
-                                prefix="×"
-                                value={dupCount[r.key] ?? "1"}
-                                min={1}
-                                max={MAX_BOXES}
-                                step={1}
-                                onInput={(e) => {
-                                  const v = e.currentTarget.value;
-                                  setDupCount((d) => ({ ...d, [r.key]: v }));
-                                }}
-                              />
-                              </s-box>
-                              <s-button
-                                variant="tertiary"
-                                icon="duplicate"
-                                accessibilityLabel={`Duplicate box ${i + 1}`}
-                                onClick={() => duplicateRow(r.key)}
-                                {...(room <= 0 ? { disabled: true } : {})}
-                              >
-                                Duplicate
-                              </s-button>
-                            </s-stack>
-                          </s-table-cell>
-                          <s-table-cell>
-                            <s-button
-                              variant="tertiary"
-                              tone="critical"
-                              icon="delete"
-                              accessibilityLabel={`Remove box ${i + 1}`}
-                              onClick={() => removeRow(r.key)}
-                            />
-                          </s-table-cell>
-                        </s-table-row>
-                      ))}
-                    </s-table-body>
-                  </s-table>
-                )}
-
-                <s-text>
-                  {boxes.length} box{boxes.length === 1 ? "" : "es"} · {totalKg.toFixed(1)} kg
-                  total
-                  {room <= 0 ? ` · maximum of ${MAX_BOXES} reached` : ""}
-                </s-text>
+          <s-section heading={`Packages (${packageCount(groups)})`}>
+            <s-stack gap="base">
+              <PackageEntry
+                groups={groups}
+                onChange={(next) => {
+                  setGroups(next);
+                  setPkgErrors([]);
+                }}
+                presets={presets}
+                errors={pkgErrors}
+                onEnterEmpty={() => submit("quote")}
+              />
 
                 <s-stack direction="inline" gap="base" alignItems="center">
                   <s-checkbox
@@ -525,7 +387,6 @@ export default function ShipOrder() {
                   </s-button>
                 </s-stack>
               </s-stack>
-            </div>
           </s-section>
 
           {errors.length > 0 ? (
@@ -542,7 +403,7 @@ export default function ShipOrder() {
             <s-stack gap="base">
               {!quoted ? (
                 <s-text color="subdued">
-                  Add boxes and press Get quotes (or Enter in a box field).
+                  Add packages and press Get quotes (or Enter on the empty entry line).
                 </s-text>
               ) : null}
               <CarrierQuotes

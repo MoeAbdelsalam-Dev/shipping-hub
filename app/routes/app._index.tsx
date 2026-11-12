@@ -7,6 +7,7 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { listUnfulfilledOrders, orderNumericId } from "../lib/orders.server";
 import { TestModeBanner } from "../components/TestModeBanner";
+import { deskUrl } from "../lib/deskLink.server";
 import type { Zone } from "../lib/gta";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -25,6 +26,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return {
         id: o.id,
         numericId: orderNumericId(o.id),
+        // Signed 30-minute link to the standalone Ship Desk page (new tab).
+        deskUrl: deskUrl(session.shop, orderNumericId(o.id)),
         name: o.name,
         createdAt: o.createdAt,
         fulfillmentStatus: o.fulfillmentStatus,
@@ -119,7 +122,9 @@ export default function OrdersToShip() {
                       : ""}
                   </s-table-cell>
                   <s-table-cell>
-                    <s-button href={`/app/ship/${o.numericId}`}>Ship</s-button>
+                    <s-button href={o.deskUrl} target="_blank" icon="external">
+                      Ship
+                    </s-button>
                   </s-table-cell>
                 </s-table-row>
               ))}

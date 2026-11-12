@@ -6,12 +6,12 @@ export interface BoxPreset {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
-  weightKg: number;
 }
 
+/** Presets fill L/W/H only — weight is always typed by staff. */
 export const boxPresets: BoxPreset[] = boxConfig.presets;
 
-/** Upper bound so a typo in "Duplicate ×N" can't create 5000 rows. */
+/** Upper bound so a typo in Qty can't create 5000 packages. */
 export const MAX_BOXES = 99;
 
 export function isValidBox(b: Box): boolean {
